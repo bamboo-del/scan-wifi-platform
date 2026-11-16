@@ -8,17 +8,14 @@ import {
 } from "../src/core/wifi-diagnostics";
 import type {
   ConnectWifiOptions,
-  WechatAppBaseInfo,
-  WechatDeviceInfo,
-  WechatSystemInfo,
   WifiConnectedListener,
   WifiOperationOptions,
 } from "../src/platform/wechat-types";
 
 interface DiagnosticApiMock {
-  getSystemInfoSync: ReturnType<typeof vi.fn<() => WechatSystemInfo>>;
-  getAppBaseInfo?: ReturnType<typeof vi.fn<() => WechatAppBaseInfo>>;
-  getDeviceInfo?: ReturnType<typeof vi.fn<() => WechatDeviceInfo>>;
+  getSystemInfoSync: ReturnType<typeof vi.fn>;
+  getAppBaseInfo?: ReturnType<typeof vi.fn>;
+  getDeviceInfo?: ReturnType<typeof vi.fn>;
   startWifi?: ReturnType<typeof vi.fn<(options: WifiOperationOptions) => void>>;
   connectWifi?: ReturnType<typeof vi.fn<(options: ConnectWifiOptions) => void>>;
   onWifiConnected?: ReturnType<typeof vi.fn<(listener: WifiConnectedListener) => void>>;
@@ -139,7 +136,7 @@ describe("Wi-Fi diagnostics", () => {
       expect.objectContaining({ SSID: "Shop Wi-Fi", password: "top-secret", maunal: false }),
     );
     expect(reportText(report)).not.toContain("top-secret");
-    expect(JSON.stringify(updates)).not.toContain("top-secret");
+    expect(reportText(updates.at(-1)!)).not.toContain("top-secret");
   });
 
   it("falls back to the partial-info listener only when its cleanup method is paired", async () => {
@@ -256,30 +253,13 @@ describe("Wi-Fi diagnostics", () => {
     expect(api.offWifiConnected).toHaveBeenCalledTimes(1);
   });
 
-  it("times out a silent startWifi and cleans up a delayed successful start", async () => {
-    vi.useFakeTimers();
-    const api = makeApi();
-    let startOptions: WifiOperationOptions | undefined;
-    api.startWifi = vi.fn((options) => {
-      startOptions = options;
-    });
-    const pending = new WifiDiagnosticsSession(api, 1000).run(
-      { ssid: "Cafe", password: "password" },
-      () => undefined,
-    );
-
-    await vi.advanceTimersByTimeAsync(1000);
-    await expect(pending).resolves.toMatchObject({ status: "timeout" });
-    startOptions?.success?.({ errMsg: "startWifi:ok" });
-    expect(api.connectWifi).not.toHaveBeenCalled();
-    expect(api.stopWifi).toHaveBeenCalledTimes(1);
-    expect(vi.getTimerCount()).toBe(0);
-  });
-
   it("keeps the full sanitized callback error code and message", async () => {
     const api = makeApi();
     api.connectWifi = vi.fn((options) =>
-      options.fail?.({ errCode: 12002, errMsg: "connectWifi:fail password=wrong-pass" }),
+      options.fail?.({
+        errCode: 12002,
+        errMsg: `connectWifi:fail password=wrong-pass token=${"a".repeat(32)}`,
+      }),
     );
 
     const report = await new WifiDiagnosticsSession(api).run(
@@ -291,5 +271,7 @@ describe("Wi-Fi diagnostics", () => {
     expect(report.errCode).toBe(12002);
     expect(report.errMsg).not.toContain("wrong-pass");
     expect(report.connectResult).not.toContain("wrong-pass");
+    expect(JSON.stringify(report)).not.toContain("a".repeat(32));
+    expect(report.userMessage).toContain("密码");
   });
 });

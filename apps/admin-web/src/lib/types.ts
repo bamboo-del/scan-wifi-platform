@@ -45,12 +45,14 @@ export interface StoreListQuery {
 }
 
 export interface StorePayload {
+  merchantId?: string;
   name: string;
   shortName?: string | null;
   logoUrl?: string | null;
   address?: string | null;
   contactName?: string | null;
   contactPhone?: string | null;
+  notes?: string | null;
   adEnabled: boolean;
   status?: StoreStatus;
 }

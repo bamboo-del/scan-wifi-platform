@@ -1,0 +1,22 @@
+.success-page {
+  padding: 100rpx 40rpx;
+  text-align: center;
+}
+.success-mark {
+  color: #14795a;
+  font-size: 100rpx;
+}
+.success-title {
+  font-size: 46rpx;
+  font-weight: 600;
+  margin: 30rpx 0;
+}
+.ssid {
+  font-size: 36rpx;
+  margin: 28rpx 0;
+}
+.note {
+  color: #65726e;
+  line-height: 1.7;
+  margin: 40rpx 0;
+}

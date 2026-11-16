@@ -4,27 +4,35 @@ import { z } from "zod";
 import type { PublicConnectService } from "../services/public-connect-service.js";
 import { errorResponseSchema } from "./route-utils.js";
 
-const sceneParams = z.object({ sceneToken: sceneTokenSchema }).strict();
+const sceneBody = z.object({ sceneToken: sceneTokenSchema }).strict();
 
 export function registerPublicRoutes(
   app: FastifyInstance,
   service: PublicConnectService,
   eventRateLimitMax: number,
 ): Promise<void> {
-  app.addHook("onSend", async (_request, reply, payload) => {
-    reply.header("Cache-Control", "no-store, private, max-age=0");
-    reply.header("Pragma", "no-cache");
-    reply.header("Expires", "0");
-    return payload;
-  });
-  app.get(
-    "/connect/:sceneToken",
+  app.post(
+    "/credential",
+    {
+      config: { rateLimit: { max: 30, timeWindow: "1 minute" } },
+      schema: { tags: ["顾客端"], summary: "用户点击后获取当前网络凭据" },
+    },
+    async (request, reply) => {
+      const { sceneToken } = sceneBody.parse(request.body);
+      reply.header("Cache-Control", "no-store, private, max-age=0");
+      reply.header("Pragma", "no-cache");
+      reply.header("Expires", "0");
+      return service.credential(sceneToken);
+    },
+  );
+  app.post(
+    "/connect",
     {
       config: { rateLimit: { max: 120, timeWindow: "1 minute" } },
       schema: {
         tags: ["顾客端"],
-        summary: "解析用户连接配置",
-        params: {
+        summary: "解析门店连接配置",
+        body: {
           type: "object",
           additionalProperties: false,
           required: ["sceneToken"],
@@ -33,28 +41,13 @@ export function registerPublicRoutes(
         response: { 400: errorResponseSchema, 404: errorResponseSchema, 429: errorResponseSchema },
       },
     },
-    async (request) => {
-      const { sceneToken } = sceneParams.parse(request.params);
+    async (request, reply) => {
+      const { sceneToken } = sceneBody.parse(request.body);
+      reply.header("Cache-Control", "no-store, private, max-age=0");
+      reply.header("Pragma", "no-cache");
+      reply.header("Expires", "0");
       return service.resolve(sceneToken);
     },
-  );
-
-  app.post(
-    "/credential",
-    {
-      config: { rateLimit: { max: 30, timeWindow: "1 minute" } },
-      schema: {
-        tags: ["顾客端"],
-        summary: "连接前获取 Wi-Fi 凭据",
-        response: {
-          400: errorResponseSchema,
-          403: errorResponseSchema,
-          404: errorResponseSchema,
-          429: errorResponseSchema,
-        },
-      },
-    },
-    async (request) => service.credential(sceneParams.parse(request.body).sceneToken),
   );
 
   app.post(

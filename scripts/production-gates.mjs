@@ -1,4 +1,12 @@
-const placeholderHostnames = new Set(["example.cn", "example.com", "localhost"]);
+const placeholderHostnames = new Set([
+  "example.cn",
+  "example.com",
+  "example.net",
+  "example.org",
+  "invalid",
+  "localhost",
+  "test",
+]);
 
 function normalizeHostname(value) {
   return value.trim().toLowerCase().replace(/\.$/u, "");
@@ -9,7 +17,12 @@ export function isPlaceholderHostname(value) {
   return (
     placeholderHostnames.has(hostname) ||
     hostname.endsWith(".example.cn") ||
-    hostname.endsWith(".example.com")
+    hostname.endsWith(".example.com") ||
+    hostname.endsWith(".example.net") ||
+    hostname.endsWith(".example.org") ||
+    hostname.endsWith(".invalid") ||
+    hostname.endsWith(".localhost") ||
+    hostname.endsWith(".test")
   );
 }
 

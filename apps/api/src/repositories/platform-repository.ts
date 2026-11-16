@@ -1,6 +1,6 @@
 import type {
   AdminStatus,
-  AdminRole,
+  AnalyticsRow,
   ClientPlatform,
   ConnectionEventType,
   QrCodeStatus,
@@ -8,7 +8,13 @@ import type {
   WifiSecurityType,
   WifiStatus,
 } from "@scan-wifi/shared-types";
-import type { CreateStoreInput, UpdateStoreInput } from "@scan-wifi/validation";
+import type {
+  AnalyticsQuery,
+  MerchantInput,
+  UpdateMerchantInput,
+  CreateStoreInput,
+  UpdateStoreInput,
+} from "@scan-wifi/validation";
 import {
   and,
   asc,
@@ -16,9 +22,9 @@ import {
   desc,
   eq,
   gte,
-  getTableColumns,
   ilike,
   inArray,
+  isNull,
   like,
   lt,
   lte,
@@ -29,6 +35,9 @@ import type { Database } from "../db/client.js";
 import {
   admins,
   adminSessions,
+  merchants,
+  merchantSessions,
+  DEFAULT_MERCHANT_ID,
   connectionEvents,
   operationLogs,
   qrCodes,
@@ -41,7 +50,6 @@ export interface AdminRecord {
   id: string;
   username: string;
   passwordHash: string;
-  role: AdminRole;
   status: AdminStatus;
   createdAt: Date;
   updatedAt: Date;
@@ -53,21 +61,28 @@ export interface SessionRecord {
   adminId: string;
   adminUsername: string;
   adminStatus: AdminStatus;
-  adminRole: AdminRole;
   expiresAt: Date;
 }
 
-export interface StoreRecord {
-  createdByUsername?: string | null;
+export interface MerchantRecord {
   id: string;
-  createdById: string | null;
-  ownerId: string | null;
+  name: string;
+  contact: string | null;
+  status: StoreStatus;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface StoreRecord {
+  id: string;
+  merchantId: string;
   name: string;
   shortName: string | null;
   logoUrl: string | null;
   address: string | null;
   contactName: string | null;
   contactPhone: string | null;
+  notes: string | null;
   status: StoreStatus;
   adEnabled: boolean;
   createdAt: Date;
@@ -78,6 +93,9 @@ export interface WifiRecord {
   id: string;
   storeId: string;
   ssid: string;
+  shortId: string;
+  spotName: string;
+  deletedAt: Date | null;
   encryptedPassword: string;
   passwordIv: string;
   passwordAuthTag: string;
@@ -90,8 +108,8 @@ export interface WifiRecord {
 }
 
 export interface QrCodeRecord {
-  createdByUsername?: string | null;
   id: string;
+  wifiId: string | null;
   storeId: string;
   sceneToken: string;
   imageUrl: string;
@@ -104,7 +122,6 @@ export interface QrCodeRecord {
 export interface StoreListRecord extends StoreRecord {
   hasWifi: boolean;
   qrCodeStatus: QrCodeStatus | null;
-  qrCode?: QrCodeRecord | null;
 }
 
 export interface DashboardAggregate {
@@ -122,6 +139,9 @@ export interface DashboardAggregate {
 
 export interface EventTotals {
   pageViews: number;
+  uniqueVisitors: number;
+  scans: number;
+  passwordCopies: number;
   adLoadSuccesses: number;
   adLoadFailures: number;
   connectClicks: number;
@@ -141,6 +161,35 @@ export interface OperationLogRecord {
 }
 
 export interface PlatformRepository {
+  findOrCreateWechatMerchant(openIdHash: string): Promise<MerchantRecord>;
+  createMerchantSession(tokenHash: string, merchantId: string, expiresAt: Date): Promise<void>;
+  findMerchantSession(tokenHash: string): Promise<string | null>;
+  deleteMerchantSession(tokenHash: string): Promise<void>;
+  listOwnedWifi(merchantId: string): Promise<WifiRecord[]>;
+  deleteWifi(id: string): Promise<void>;
+  lockStore(id: string): Promise<void>;
+  refreshQrImage(
+    id: string,
+    imageUrl: string,
+    provider: QrCodeRecord["provider"],
+  ): Promise<QrCodeRecord>;
+  listMerchants(): Promise<MerchantRecord[]>;
+  getMerchant(id: string): Promise<MerchantRecord | null>;
+  createMerchant(input: MerchantInput): Promise<MerchantRecord>;
+  updateMerchant(id: string, input: UpdateMerchantInput): Promise<MerchantRecord | null>;
+  listWifi(storeId: string): Promise<WifiRecord[]>;
+  getWifiById(id: string): Promise<WifiRecord | null>;
+  saveWifi(
+    input: Omit<
+      WifiRecord,
+      "id" | "version" | "createdAt" | "updatedAt" | "shortId" | "spotName" | "deletedAt"
+    > &
+      Partial<Pick<WifiRecord, "shortId" | "spotName" | "deletedAt">>,
+    id?: string,
+  ): Promise<WifiRecord>;
+  setWifiStatus(id: string, status: WifiStatus): Promise<WifiRecord | null>;
+  getLatestQrForWifi(wifiId: string): Promise<QrCodeRecord | null>;
+  getAnalytics(input: AnalyticsQuery): Promise<AnalyticsRow[]>;
   healthCheck(): Promise<void>;
   transaction<T>(callback: (repository: PlatformRepository) => Promise<T>): Promise<T>;
   findAdminByUsername(username: string): Promise<AdminRecord | null>;
@@ -149,15 +198,6 @@ export interface PlatformRepository {
     username: string,
     passwordHash: string,
   ): Promise<{ admin: AdminRecord; created: boolean }>;
-  lockAccount(id: string): Promise<AdminRecord | null>;
-  listAccounts(): Promise<AdminRecord[]>;
-  createOperator(username: string, passwordHash: string): Promise<AdminRecord | null>;
-  updateAccount(
-    id: string,
-    input: { status?: AdminStatus; passwordHash?: string },
-  ): Promise<AdminRecord | null>;
-  deleteAdminSessions(adminId: string): Promise<void>;
-  transferStore(id: string, ownerId: string | null): Promise<StoreRecord | null>;
   updateAdminLastLogin(id: string, at: Date): Promise<void>;
   createSession(tokenHash: string, adminId: string, expiresAt: Date): Promise<void>;
   findSession(tokenHash: string, now: Date): Promise<SessionRecord | null>;
@@ -168,19 +208,23 @@ export interface PlatformRepository {
     pageSize: number;
     search?: string;
     status?: StoreStatus;
-    ownerId?: string;
   }): Promise<{ items: StoreListRecord[]; total: number }>;
-  createStore(input: CreateStoreInput, actorId?: string): Promise<StoreRecord>;
-  getStore(id: string, lock?: boolean): Promise<StoreRecord | null>;
+  createStore(input: CreateStoreInput): Promise<StoreRecord>;
+  getStore(id: string): Promise<StoreRecord | null>;
   updateStore(id: string, input: UpdateStoreInput): Promise<StoreRecord | null>;
   getWifi(storeId: string): Promise<WifiRecord | null>;
   upsertWifi(
-    input: Omit<WifiRecord, "id" | "version" | "createdAt" | "updatedAt">,
+    input: Omit<
+      WifiRecord,
+      "id" | "version" | "createdAt" | "updatedAt" | "shortId" | "spotName" | "deletedAt"
+    > &
+      Partial<Pick<WifiRecord, "shortId" | "spotName" | "deletedAt">>,
   ): Promise<WifiRecord>;
   getLatestQrForStore(storeId: string): Promise<QrCodeRecord | null>;
   getQrById(id: string): Promise<QrCodeRecord | null>;
   getQrByScene(sceneToken: string): Promise<QrCodeRecord | null>;
   replaceActiveQr(input: {
+    wifiId?: string;
     storeId: string;
     sceneToken: string;
     imageUrl: string;
@@ -190,13 +234,15 @@ export interface PlatformRepository {
   insertEvent(input: {
     storeId: string;
     qrCodeId: string;
+    wifiId?: string;
+    visitorHash?: string | null;
     eventType: ConnectionEventType;
     platform: ClientPlatform;
     errorCode: string | null;
     errorMessageSanitized: string | null;
     occurredAt: Date;
   }): Promise<void>;
-  getDashboard(now: Date, ownerId?: string): Promise<DashboardAggregate>;
+  getDashboard(now: Date): Promise<DashboardAggregate>;
   getStoreStatistics(
     storeId: string,
     from: Date,
@@ -224,6 +270,9 @@ export interface PlatformRepository {
 function eventTotalsFromRow(row: Record<string, unknown> | undefined): EventTotals {
   return {
     pageViews: Number(row?.pageViews ?? 0),
+    uniqueVisitors: Number(row?.uniqueVisitors ?? 0),
+    scans: Number(row?.scans ?? 0),
+    passwordCopies: Number(row?.passwordCopies ?? 0),
     adLoadSuccesses: Number(row?.adLoadSuccesses ?? 0),
     adLoadFailures: Number(row?.adLoadFailures ?? 0),
     connectClicks: Number(row?.connectClicks ?? 0),
@@ -232,22 +281,10 @@ function eventTotalsFromRow(row: Record<string, unknown> | undefined): EventTota
   };
 }
 
-const storeCreatorUsername = sql<string | null>`(
-  select a.username from admins a where a.id = coalesce(stores.created_by_id, (
-    select l.admin_id from operation_logs l
-    where l.resource_type = 'store' and l.resource_id = stores.id::text
-      and l.action = 'store.create'
-    order by l.created_at asc, l.id asc limit 1
-  ))
-)`;
-const qrCreatorUsername = sql<string | null>`(
-  select a.username from operation_logs l join admins a on a.id = l.admin_id
-  where l.resource_type = 'qr_code' and l.resource_id = qr_codes.id::text
-    and l.action = 'qrcode.generate'
-  order by l.created_at asc, l.id asc limit 1
-)`;
-
 const eventTotalsSelection = {
+  uniqueVisitors: sql<number>`count(distinct ${connectionEvents.visitorHash}) filter (where ${connectionEvents.eventType} = 'page_view')`,
+  scans: sql<number>`count(*) filter (where ${connectionEvents.eventType} = 'scan')`,
+  passwordCopies: sql<number>`count(*) filter (where ${connectionEvents.eventType} = 'password_copy')`,
   pageViews: sql<number>`count(*) filter (where ${connectionEvents.eventType} = 'page_view')`,
   adLoadSuccesses: sql<number>`count(*) filter (where ${connectionEvents.eventType} = 'ad_load_success')`,
   adLoadFailures: sql<number>`count(*) filter (where ${connectionEvents.eventType} = 'ad_load_failure')`,
@@ -256,7 +293,7 @@ const eventTotalsSelection = {
   connectFailures: sql<number>`count(*) filter (where ${connectionEvents.eventType} = 'connect_failure')`,
 };
 
-const operationActionNamespaces = new Set(["store", "wifi", "qrcode", "settings", "account"]);
+const operationActionNamespaces = new Set(["store", "wifi", "qrcode", "settings"]);
 
 function escapeLikePattern(value: string): string {
   return value.replaceAll("\\", "\\\\").replaceAll("%", "\\%").replaceAll("_", "\\_");
@@ -273,6 +310,223 @@ function operationActionCondition(action: string) {
 export class PostgresPlatformRepository implements PlatformRepository {
   public constructor(private readonly db: Database) {}
 
+  public async findOrCreateWechatMerchant(openIdHash: string): Promise<MerchantRecord> {
+    const [row] = await this.db
+      .insert(merchants)
+      .values({ openIdHash, name: "小程序商户" })
+      .onConflictDoUpdate({ target: merchants.openIdHash, set: { openIdHash } })
+      .returning();
+    if (!row) throw new Error("Merchant insert returned no row");
+    return row;
+  }
+  public async createMerchantSession(
+    tokenHash: string,
+    merchantId: string,
+    expiresAt: Date,
+  ): Promise<void> {
+    await this.db.delete(merchantSessions).where(lt(merchantSessions.expiresAt, new Date()));
+    await this.db.insert(merchantSessions).values({ tokenHash, merchantId, expiresAt });
+  }
+  public async findMerchantSession(tokenHash: string): Promise<string | null> {
+    const [row] = await this.db
+      .select({ id: merchants.id })
+      .from(merchantSessions)
+      .innerJoin(merchants, eq(merchants.id, merchantSessions.merchantId))
+      .where(
+        and(
+          eq(merchantSessions.tokenHash, tokenHash),
+          gte(merchantSessions.expiresAt, new Date()),
+          eq(merchants.status, "active"),
+        ),
+      );
+    return row?.id ?? null;
+  }
+  public async deleteMerchantSession(tokenHash: string): Promise<void> {
+    await this.db.delete(merchantSessions).where(eq(merchantSessions.tokenHash, tokenHash));
+  }
+  public async listOwnedWifi(merchantId: string): Promise<WifiRecord[]> {
+    const rows = await this.db
+      .select({ wifi: wifiConfigs })
+      .from(wifiConfigs)
+      .innerJoin(stores, eq(stores.id, wifiConfigs.storeId))
+      .where(and(eq(stores.merchantId, merchantId), isNull(wifiConfigs.deletedAt)))
+      .orderBy(desc(wifiConfigs.createdAt));
+    return rows.map((row) => row.wifi);
+  }
+  public async deleteWifi(id: string): Promise<void> {
+    await this.db
+      .update(wifiConfigs)
+      .set({
+        deletedAt: new Date(),
+        updatedAt: new Date(),
+        status: "disabled",
+        encryptedPassword: "",
+        passwordIv: "",
+        passwordAuthTag: "",
+      })
+      .where(eq(wifiConfigs.id, id));
+    await this.db
+      .update(qrCodes)
+      .set({ status: "disabled", disabledAt: new Date() })
+      .where(eq(qrCodes.wifiId, id));
+  }
+
+  public async lockStore(id: string): Promise<void> {
+    await this.db.execute(
+      sql`select ${stores.id} from ${stores} where ${stores.id} = ${id} for update`,
+    );
+  }
+
+  public async refreshQrImage(
+    id: string,
+    imageUrl: string,
+    provider: QrCodeRecord["provider"],
+  ): Promise<QrCodeRecord> {
+    const [row] = await this.db
+      .update(qrCodes)
+      .set({ imageUrl, provider, generatedAt: new Date() })
+      .where(eq(qrCodes.id, id))
+      .returning();
+    if (!row) throw new Error("QR image update returned no row");
+    return row as QrCodeRecord;
+  }
+
+  public async listMerchants(): Promise<MerchantRecord[]> {
+    return this.db.select().from(merchants).orderBy(asc(merchants.name));
+  }
+  public async getMerchant(id: string): Promise<MerchantRecord | null> {
+    const [row] = await this.db.select().from(merchants).where(eq(merchants.id, id));
+    return row ?? null;
+  }
+  public async createMerchant(input: MerchantInput): Promise<MerchantRecord> {
+    const [row] = await this.db.insert(merchants).values(input).returning();
+    if (!row) throw new Error("Merchant insert returned no row");
+    return row;
+  }
+  public async updateMerchant(
+    id: string,
+    input: UpdateMerchantInput,
+  ): Promise<MerchantRecord | null> {
+    const [row] = await this.db
+      .update(merchants)
+      .set({ ...input, updatedAt: new Date() })
+      .where(eq(merchants.id, id))
+      .returning();
+    return row ?? null;
+  }
+  public async listWifi(storeId: string): Promise<WifiRecord[]> {
+    return this.db
+      .select()
+      .from(wifiConfigs)
+      .where(and(eq(wifiConfigs.storeId, storeId), isNull(wifiConfigs.deletedAt)))
+      .orderBy(asc(wifiConfigs.createdAt), asc(wifiConfigs.id));
+  }
+  public async getWifiById(id: string): Promise<WifiRecord | null> {
+    const [row] = await this.db
+      .select()
+      .from(wifiConfigs)
+      .where(and(eq(wifiConfigs.id, id), isNull(wifiConfigs.deletedAt)));
+    return row ?? null;
+  }
+  public async saveWifi(
+    input: Omit<
+      WifiRecord,
+      "id" | "version" | "createdAt" | "updatedAt" | "shortId" | "spotName" | "deletedAt"
+    > &
+      Partial<Pick<WifiRecord, "shortId" | "spotName" | "deletedAt">>,
+    id?: string,
+  ): Promise<WifiRecord> {
+    if (!id) {
+      return this.db.transaction(async (transaction) => {
+        await transaction.execute(
+          sql`select ${stores.id} from ${stores} where ${stores.id} = ${input.storeId} for update`,
+        );
+        const repository = new PostgresPlatformRepository(transaction);
+        const existing = await repository.getWifi(input.storeId);
+        const [row] = await transaction.insert(wifiConfigs).values(input).returning();
+        if (!row) throw new Error("Wi-Fi insert returned no row");
+        // Preserve old printed codes when their store receives its first network.
+        if (!existing) {
+          await transaction
+            .update(qrCodes)
+            .set({ wifiId: row.id })
+            .where(and(eq(qrCodes.storeId, input.storeId), isNull(qrCodes.wifiId)));
+        }
+        return row;
+      });
+    }
+    const rows = await this.db
+      .update(wifiConfigs)
+      .set({ ...input, version: sql`${wifiConfigs.version} + 1`, updatedAt: new Date() })
+      .where(
+        and(
+          eq(wifiConfigs.id, id),
+          eq(wifiConfigs.storeId, input.storeId),
+          isNull(wifiConfigs.deletedAt),
+        ),
+      )
+      .returning();
+    const row = rows[0];
+    if (!row) throw new Error("Wi-Fi write returned no row");
+    return row;
+  }
+  public async setWifiStatus(id: string, status: WifiStatus): Promise<WifiRecord | null> {
+    const [row] = await this.db
+      .update(wifiConfigs)
+      .set({ status, updatedAt: new Date() })
+      .where(and(eq(wifiConfigs.id, id), isNull(wifiConfigs.deletedAt)))
+      .returning();
+    return row ?? null;
+  }
+  public async getLatestQrForWifi(wifiId: string): Promise<QrCodeRecord | null> {
+    const [row] = await this.db
+      .select()
+      .from(qrCodes)
+      .where(eq(qrCodes.wifiId, wifiId))
+      .orderBy(desc(sql`${qrCodes.status} = 'active'`), desc(qrCodes.generatedAt), desc(qrCodes.id))
+      .limit(1);
+    return (row as QrCodeRecord | undefined) ?? null;
+  }
+  public async getAnalytics(input: AnalyticsQuery): Promise<AnalyticsRow[]> {
+    const day = sql`date_trunc('day', ${connectionEvents.occurredAt} at time zone 'UTC')`;
+    const conditions = [
+      gte(connectionEvents.occurredAt, new Date(input.from)),
+      lt(connectionEvents.occurredAt, new Date(input.to)),
+    ];
+    if (input.merchantId) conditions.push(eq(stores.merchantId, input.merchantId));
+    if (input.storeId) conditions.push(eq(stores.id, input.storeId));
+    if (input.wifiId) conditions.push(eq(connectionEvents.wifiId, input.wifiId));
+    const rows = await this.db
+      .select({
+        date: sql<string>`to_char(${day}, 'YYYY-MM-DD')`,
+        merchantId: stores.merchantId,
+        storeId: stores.id,
+        wifiId: connectionEvents.wifiId,
+        ssid: wifiConfigs.ssid,
+        ...eventTotalsSelection,
+      })
+      .from(connectionEvents)
+      .innerJoin(stores, eq(stores.id, connectionEvents.storeId))
+      .leftJoin(wifiConfigs, eq(wifiConfigs.id, connectionEvents.wifiId))
+      .where(and(...conditions))
+      .groupBy(day, stores.merchantId, stores.id, connectionEvents.wifiId, wifiConfigs.ssid)
+      .orderBy(desc(day), asc(stores.id), asc(connectionEvents.wifiId));
+    return rows.map((row) => {
+      const totals = eventTotalsFromRow(row);
+      return {
+        date: row.date,
+        merchantId: row.merchantId,
+        storeId: row.storeId,
+        wifiId: row.wifiId,
+        ssid: row.ssid,
+        totals: {
+          ...totals,
+          successRate: totals.connectClicks ? totals.connectSuccesses / totals.connectClicks : 0,
+        },
+      };
+    });
+  }
+
   public async healthCheck(): Promise<void> {
     await this.db.execute(sql`select 1`);
   }
@@ -281,7 +535,7 @@ export class PostgresPlatformRepository implements PlatformRepository {
     callback: (repository: PlatformRepository) => Promise<T>,
   ): Promise<T> {
     return this.db.transaction((transaction) =>
-      callback(new PostgresPlatformRepository(transaction as unknown as Database)),
+      callback(new PostgresPlatformRepository(transaction)),
     );
   }
 
@@ -314,54 +568,6 @@ export class PostgresPlatformRepository implements PlatformRepository {
     return { admin: existing, created: false };
   }
 
-  public async lockAccount(id: string): Promise<AdminRecord | null> {
-    const [row] = await this.db
-      .select()
-      .from(admins)
-      .where(eq(admins.id, id))
-      .for("update")
-      .limit(1);
-    return row ?? null;
-  }
-
-  public async listAccounts(): Promise<AdminRecord[]> {
-    return this.db.select().from(admins).orderBy(asc(admins.username));
-  }
-
-  public async createOperator(username: string, passwordHash: string): Promise<AdminRecord | null> {
-    const [row] = await this.db
-      .insert(admins)
-      .values({ username, passwordHash, role: "operator" })
-      .onConflictDoNothing()
-      .returning();
-    return row ?? null;
-  }
-
-  public async updateAccount(
-    id: string,
-    input: { status?: AdminStatus; passwordHash?: string },
-  ): Promise<AdminRecord | null> {
-    const [row] = await this.db
-      .update(admins)
-      .set({ ...input, updatedAt: new Date() })
-      .where(eq(admins.id, id))
-      .returning();
-    return row ?? null;
-  }
-
-  public async deleteAdminSessions(adminId: string): Promise<void> {
-    await this.db.delete(adminSessions).where(eq(adminSessions.adminId, adminId));
-  }
-
-  public async transferStore(id: string, ownerId: string | null): Promise<StoreRecord | null> {
-    const [row] = await this.db
-      .update(stores)
-      .set({ ownerId, updatedAt: new Date() })
-      .where(eq(stores.id, id))
-      .returning();
-    return row ?? null;
-  }
-
   public async updateAdminLastLogin(id: string, at: Date): Promise<void> {
     await this.db.update(admins).set({ lastLoginAt: at, updatedAt: at }).where(eq(admins.id, id));
   }
@@ -377,7 +583,6 @@ export class PostgresPlatformRepository implements PlatformRepository {
         adminId: adminSessions.adminId,
         adminUsername: admins.username,
         adminStatus: admins.status,
-        adminRole: admins.role,
         expiresAt: adminSessions.expiresAt,
       })
       .from(adminSessions)
@@ -400,10 +605,8 @@ export class PostgresPlatformRepository implements PlatformRepository {
     pageSize: number;
     search?: string;
     status?: StoreStatus;
-    ownerId?: string;
   }): Promise<{ items: StoreListRecord[]; total: number }> {
     const conditions = [];
-    if (input.ownerId) conditions.push(eq(stores.ownerId, input.ownerId));
     if (input.status) conditions.push(eq(stores.status, input.status));
     if (input.search) {
       const term = `%${escapeLikePattern(input.search)}%`;
@@ -415,6 +618,7 @@ export class PostgresPlatformRepository implements PlatformRepository {
           sql`exists (
             select 1 from ${wifiConfigs}
             where ${wifiConfigs.storeId} = ${stores.id}
+              and ${wifiConfigs.deletedAt} is null
               and ${wifiConfigs.ssid} ilike ${term}
           )`,
         )!,
@@ -423,7 +627,7 @@ export class PostgresPlatformRepository implements PlatformRepository {
     const where = conditions.length > 0 ? and(...conditions) : undefined;
     const [rows, totalRows] = await Promise.all([
       this.db
-        .select({ ...getTableColumns(stores), createdByUsername: storeCreatorUsername })
+        .select()
         .from(stores)
         .where(where)
         .orderBy(desc(stores.createdAt))
@@ -437,44 +641,41 @@ export class PostgresPlatformRepository implements PlatformRepository {
       this.db
         .select({ storeId: wifiConfigs.storeId })
         .from(wifiConfigs)
-        .where(inArray(wifiConfigs.storeId, ids)),
+        .where(and(inArray(wifiConfigs.storeId, ids), isNull(wifiConfigs.deletedAt))),
       this.db
-        .select({ ...getTableColumns(qrCodes), createdByUsername: qrCreatorUsername })
+        .select({ storeId: qrCodes.storeId, status: qrCodes.status })
         .from(qrCodes)
         .where(inArray(qrCodes.storeId, ids))
-        .orderBy(asc(qrCodes.status), desc(qrCodes.generatedAt)),
+        .orderBy(
+          desc(sql`${qrCodes.status} = 'active'`),
+          desc(qrCodes.generatedAt),
+          desc(qrCodes.id),
+        ),
     ]);
     const wifiStoreIds = new Set(wifiRows.map((row) => row.storeId));
-    const latestQr = new Map<string, QrCodeRecord>();
-    for (const row of qrRows)
-      if (!latestQr.has(row.storeId)) latestQr.set(row.storeId, row as QrCodeRecord);
+    const latestQr = new Map<string, QrCodeStatus>();
+    for (const row of qrRows) if (!latestQr.has(row.storeId)) latestQr.set(row.storeId, row.status);
     return {
       items: rows.map((row) => ({
         ...row,
         hasWifi: wifiStoreIds.has(row.id),
-        qrCodeStatus: latestQr.get(row.id)?.status ?? null,
-        qrCode: latestQr.get(row.id) ?? null,
+        qrCodeStatus: latestQr.get(row.id) ?? null,
       })),
       total: Number(totalRows[0]?.value ?? 0),
     };
   }
 
-  public async createStore(input: CreateStoreInput, actorId?: string): Promise<StoreRecord> {
+  public async createStore(input: CreateStoreInput): Promise<StoreRecord> {
     const [row] = await this.db
       .insert(stores)
-      .values({ ...input, createdById: actorId ?? null, ownerId: actorId ?? null })
+      .values({ ...input, merchantId: input.merchantId ?? DEFAULT_MERCHANT_ID })
       .returning();
     if (!row) throw new Error("Store insert returned no row");
     return row;
   }
 
-  public async getStore(id: string, lock?: boolean): Promise<StoreRecord | null> {
-    const query = this.db
-      .select({ ...getTableColumns(stores), createdByUsername: storeCreatorUsername })
-      .from(stores)
-      .where(eq(stores.id, id))
-      .limit(1);
-    const [row] = await (lock ? query.for("update") : query);
+  public async getStore(id: string): Promise<StoreRecord | null> {
+    const [row] = await this.db.select().from(stores).where(eq(stores.id, id)).limit(1);
     return row ?? null;
   }
 
@@ -491,53 +692,47 @@ export class PostgresPlatformRepository implements PlatformRepository {
     const [row] = await this.db
       .select()
       .from(wifiConfigs)
-      .where(eq(wifiConfigs.storeId, storeId))
+      .where(and(eq(wifiConfigs.storeId, storeId), isNull(wifiConfigs.deletedAt)))
+      .orderBy(asc(wifiConfigs.createdAt), asc(wifiConfigs.id))
       .limit(1);
     return row ?? null;
   }
 
   public async upsertWifi(
-    input: Omit<WifiRecord, "id" | "version" | "createdAt" | "updatedAt">,
+    input: Omit<
+      WifiRecord,
+      "id" | "version" | "createdAt" | "updatedAt" | "shortId" | "spotName" | "deletedAt"
+    > &
+      Partial<Pick<WifiRecord, "shortId" | "spotName" | "deletedAt">>,
   ): Promise<WifiRecord> {
-    const now = new Date();
-    const [row] = await this.db
-      .insert(wifiConfigs)
-      .values({ ...input, updatedAt: now })
-      .onConflictDoUpdate({
-        target: wifiConfigs.storeId,
-        set: {
-          ssid: input.ssid,
-          encryptedPassword: input.encryptedPassword,
-          passwordIv: input.passwordIv,
-          passwordAuthTag: input.passwordAuthTag,
-          bssid: input.bssid,
-          securityType: input.securityType,
-          status: input.status,
-          version: sql`${wifiConfigs.version} + 1`,
-          updatedAt: now,
-        },
-      })
-      .returning();
-    if (!row) throw new Error("Wi-Fi upsert returned no row");
-    return row;
+    return this.db.transaction(async (transaction) => {
+      await transaction.execute(
+        sql`select ${stores.id} from ${stores} where ${stores.id} = ${input.storeId} for update`,
+      );
+      const repository = new PostgresPlatformRepository(transaction);
+      const existing = await repository.getWifi(input.storeId);
+      return repository.saveWifi(input, existing?.id);
+    });
   }
 
   public async getLatestQrForStore(storeId: string): Promise<QrCodeRecord | null> {
+    const wifi = await this.getWifi(storeId);
     const [row] = await this.db
-      .select({ ...getTableColumns(qrCodes), createdByUsername: qrCreatorUsername })
+      .select()
       .from(qrCodes)
-      .where(eq(qrCodes.storeId, storeId))
-      .orderBy(asc(qrCodes.status), desc(qrCodes.generatedAt))
+      .where(
+        and(
+          eq(qrCodes.storeId, storeId),
+          wifi ? eq(qrCodes.wifiId, wifi.id) : isNull(qrCodes.wifiId),
+        ),
+      )
+      .orderBy(desc(sql`${qrCodes.status} = 'active'`), desc(qrCodes.generatedAt), desc(qrCodes.id))
       .limit(1);
     return (row as QrCodeRecord | undefined) ?? null;
   }
 
   public async getQrById(id: string): Promise<QrCodeRecord | null> {
-    const [row] = await this.db
-      .select({ ...getTableColumns(qrCodes), createdByUsername: qrCreatorUsername })
-      .from(qrCodes)
-      .where(eq(qrCodes.id, id))
-      .limit(1);
+    const [row] = await this.db.select().from(qrCodes).where(eq(qrCodes.id, id)).limit(1);
     return (row as QrCodeRecord | undefined) ?? null;
   }
 
@@ -551,23 +746,34 @@ export class PostgresPlatformRepository implements PlatformRepository {
   }
 
   public async replaceActiveQr(input: {
+    wifiId?: string;
     storeId: string;
     sceneToken: string;
     imageUrl: string;
     provider: QrCodeRecord["provider"];
   }): Promise<QrCodeRecord> {
     return this.db.transaction(async (transaction) => {
-      await transaction
-        .select({ id: stores.id })
-        .from(stores)
-        .where(eq(stores.id, input.storeId))
-        .for("update");
       const now = new Date();
+      await transaction.execute(
+        sql`select ${stores.id} from ${stores} where ${stores.id} = ${input.storeId} for update`,
+      );
+      const wifiId =
+        input.wifiId ??
+        (await new PostgresPlatformRepository(transaction).getWifi(input.storeId))?.id;
       await transaction
         .update(qrCodes)
         .set({ status: "disabled", disabledAt: now })
-        .where(and(eq(qrCodes.storeId, input.storeId), eq(qrCodes.status, "active")));
-      const [row] = await transaction.insert(qrCodes).values(input).returning();
+        .where(
+          and(
+            eq(qrCodes.storeId, input.storeId),
+            wifiId ? eq(qrCodes.wifiId, wifiId) : isNull(qrCodes.wifiId),
+            eq(qrCodes.status, "active"),
+          ),
+        );
+      const [row] = await transaction
+        .insert(qrCodes)
+        .values({ ...input, wifiId: wifiId ?? null })
+        .returning();
       if (!row) throw new Error("QR code insert returned no row");
       return row as QrCodeRecord;
     });
@@ -581,16 +787,20 @@ export class PostgresPlatformRepository implements PlatformRepository {
     return this.db.transaction(async (transaction) => {
       const [current] = await transaction.select().from(qrCodes).where(eq(qrCodes.id, id)).limit(1);
       if (!current) return null;
-      await transaction
-        .select({ id: stores.id })
-        .from(stores)
-        .where(eq(stores.id, current.storeId))
-        .for("update");
+      await transaction.execute(
+        sql`select ${stores.id} from ${stores} where ${stores.id} = ${current.storeId} for update`,
+      );
       if (status === "active") {
         await transaction
           .update(qrCodes)
           .set({ status: "disabled", disabledAt: at })
-          .where(and(eq(qrCodes.storeId, current.storeId), eq(qrCodes.status, "active")));
+          .where(
+            and(
+              eq(qrCodes.storeId, current.storeId),
+              current.wifiId ? eq(qrCodes.wifiId, current.wifiId) : isNull(qrCodes.wifiId),
+              eq(qrCodes.status, "active"),
+            ),
+          );
       }
       const [row] = await transaction
         .update(qrCodes)
@@ -604,6 +814,8 @@ export class PostgresPlatformRepository implements PlatformRepository {
   public async insertEvent(input: {
     storeId: string;
     qrCodeId: string;
+    wifiId?: string;
+    visitorHash?: string | null;
     eventType: ConnectionEventType;
     platform: ClientPlatform;
     errorCode: string | null;
@@ -613,33 +825,23 @@ export class PostgresPlatformRepository implements PlatformRepository {
     await this.db.insert(connectionEvents).values(input);
   }
 
-  public async getDashboard(now: Date, ownerId?: string): Promise<DashboardAggregate> {
-    const storeScope = ownerId ? eq(stores.ownerId, ownerId) : undefined;
-    const qrScope = ownerId
-      ? sql`exists (select 1 from ${stores} where ${stores.id} = ${qrCodes.storeId} and ${stores.ownerId} = ${ownerId})`
-      : undefined;
-    const eventScope = ownerId
-      ? sql`exists (select 1 from ${stores} where ${stores.id} = ${connectionEvents.storeId} and ${stores.ownerId} = ${ownerId})`
-      : undefined;
+  public async getDashboard(now: Date): Promise<DashboardAggregate> {
     const todayStart = new Date(now);
     todayStart.setUTCHours(0, 0, 0, 0);
     const sevenDayStart = new Date(todayStart);
     sevenDayStart.setUTCDate(sevenDayStart.getUTCDate() - 6);
     const trendDay = sql`date_trunc('day', ${connectionEvents.occurredAt} at time zone 'UTC')`;
     const [storeCount, qrCount, todayRows, funnelRows, trendRows] = await Promise.all([
-      this.db.select({ value: count() }).from(stores).where(storeScope),
-      this.db
-        .select({ value: count() })
-        .from(qrCodes)
-        .where(and(eq(qrCodes.status, "active"), qrScope)),
+      this.db.select({ value: count() }).from(stores),
+      this.db.select({ value: count() }).from(qrCodes).where(eq(qrCodes.status, "active")),
       this.db
         .select(eventTotalsSelection)
         .from(connectionEvents)
-        .where(and(gte(connectionEvents.occurredAt, todayStart), eventScope)),
+        .where(gte(connectionEvents.occurredAt, todayStart)),
       this.db
         .select(eventTotalsSelection)
         .from(connectionEvents)
-        .where(and(gte(connectionEvents.occurredAt, sevenDayStart), eventScope)),
+        .where(gte(connectionEvents.occurredAt, sevenDayStart)),
       this.db
         .select({
           date: sql<string>`to_char(${trendDay}, 'YYYY-MM-DD')`,
@@ -648,7 +850,7 @@ export class PostgresPlatformRepository implements PlatformRepository {
           connectSuccesses: eventTotalsSelection.connectSuccesses,
         })
         .from(connectionEvents)
-        .where(and(gte(connectionEvents.occurredAt, sevenDayStart), eventScope))
+        .where(gte(connectionEvents.occurredAt, sevenDayStart))
         .groupBy(trendDay)
         .orderBy(asc(trendDay)),
     ]);

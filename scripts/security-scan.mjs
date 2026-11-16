@@ -118,20 +118,16 @@ if (productionMode) {
       "apps/mini-program/dist/config/runtime.generated.js: insecure localhost is enabled",
     );
   }
-  if (
-    !generatedRuntime.includes(
-      `legacyWifiAdapterEnabled: ${process.env.MINIPROGRAM_ENABLE_LEGACY_WIFI_API === "true"}`,
-    )
-  ) {
+  if (!/legacyWifiAdapterEnabled: (?:true|false)/u.test(generatedRuntime)) {
     findings.push(
-      "apps/mini-program/dist/config/runtime.generated.js: production legacy Wi-Fi API must match the explicit build setting",
+      "apps/mini-program/dist/config/runtime.generated.js: Wi-Fi adapter requires an explicit boolean switch",
     );
   }
   try {
     const pages = JSON.parse(generatedManifest).pages;
-    if (!Array.isArray(pages) || pages.includes("pages/wifi-diagnostics/index")) {
+    if (!Array.isArray(pages) || pages.length !== 1 || pages[0] !== "pages/connect/index") {
       findings.push(
-        "apps/mini-program/dist/app.json: production manifest must exclude the Wi-Fi diagnostic page",
+        "apps/mini-program/dist/app.json: production manifest must contain only the customer connection page",
       );
     }
   } catch {

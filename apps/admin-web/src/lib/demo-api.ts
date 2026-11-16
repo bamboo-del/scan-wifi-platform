@@ -1,4 +1,4 @@
-import type { AccountSummary } from "@scan-wifi/shared-types";
+import type { AnalyticsRow, MerchantResponse, WifiNetworkResponse } from "@scan-wifi/shared-types";
 import type {
   AdminSession,
   DashboardResponse,
@@ -21,37 +21,18 @@ import type {
 const sleep = async (milliseconds = 120): Promise<void> =>
   new Promise((resolve) => window.setTimeout(resolve, milliseconds));
 
+const DEFAULT_MERCHANT_ID = "11111111-1111-4111-8111-111111111111";
 const DEMO_NOW = "2026-07-11T14:32:18.000Z";
 
 function placeholderQrDataUrl(label: string): string {
+  label = label.replace(/[<>&"']/g, "");
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="360" height="420" viewBox="0 0 360 420"><rect width="360" height="420" rx="24" fill="#fff"/><rect x="1" y="1" width="358" height="418" rx="23" fill="none" stroke="#d9e1e8"/><g fill="#15242c">${Array.from({ length: 15 }, (_, row) => Array.from({ length: 15 }, (_, col) => ((row * 7 + col * 11 + row * col) % 5 < 2 ? `<rect x="${52 + col * 17}" y="${42 + row * 17}" width="13" height="13" rx="2"/>` : "")).join("")).join("")}<path d="M52 42h72v72H52zM62 52v52h52V52zM76 66h24v24H76zM236 42h72v72h-72zM246 52v52h52V52zM260 66h24v24h-24zM52 226h72v72H52zM62 236v52h52v-52zM76 250h24v24H76z" fill-rule="evenodd"/></g><text x="180" y="335" text-anchor="middle" font-family="Microsoft YaHei, sans-serif" font-size="18" font-weight="700" fill="#15242c">${label}</text><text x="180" y="372" text-anchor="middle" font-family="Microsoft YaHei, sans-serif" font-size="15" fill="#e04f5f">仅供本地测试</text><text x="180" y="397" text-anchor="middle" font-family="Microsoft YaHei, sans-serif" font-size="12" fill="#788892">非微信小程序码</text></svg>`;
   return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
 }
 
 let authenticated = false;
-const accounts: AccountSummary[] = [
-  {
-    id: "admin-1",
-    username: "admin",
-    role: "admin",
-    status: "active",
-    createdAt: DEMO_NOW,
-    lastLoginAt: null,
-  },
-];
-const accountPasswords = new Map([["admin-1", "Admin123!"]]);
-let currentAccount = accounts[0]!;
-function requireDemoAdmin(): void {
-  if (!authenticated) throw new Error("UNAUTHENTICATED");
-  if (currentAccount.role !== "admin") throw new Error("无权执行此操作");
-}
-function visibleStores(): StoreDetail[] {
-  return stores.filter(
-    (store) => currentAccount.role === "admin" || store.ownerId === currentAccount.id,
-  );
-}
 let settings: SystemSettings = {
-  globalAdEnabled: true,
+  globalAdEnabled: false,
   adUnitConfigured: false,
   wechatQrConfigured: false,
   qrCodeProvider: "local-placeholder",
@@ -60,22 +41,23 @@ let settings: SystemSettings = {
 
 let stores: StoreDetail[] = [
   {
-    createdById: null,
-    ownerId: null,
+    merchantId: DEFAULT_MERCHANT_ID,
     id: "store-nanshan",
-    name: "示例用户一",
-    shortName: "示例一",
+    name: "南山咖啡·科技园店",
+    shortName: "科技园店",
     logoUrl: null,
     address: "广东省深圳市南山区科技南十二路 18 号",
-    contactName: "张先生",
+    contactName: "张店长",
     contactPhone: "138 0000 0000",
+    notes: "工作日 08:00—21:00 营业",
     status: "active",
-    adEnabled: true,
+    adEnabled: false,
     hasWifi: true,
     qrCodeStatus: "active",
     createdAt: "2026-05-15T02:05:33.000Z",
     updatedAt: DEMO_NOW,
     wifi: {
+      id: crypto.randomUUID(),
       configured: true,
       ssid: "NanshanCoffee-FreeWiFi",
       passwordMasked: "••••••••",
@@ -87,26 +69,27 @@ let stores: StoreDetail[] = [
     },
     qrCode: {
       id: "qr-nanshan",
+      wifiId: null,
       storeId: "store-nanshan",
       sceneToken: "8f42b4d0a7614fefa33ec7c9fe8bd08c",
       status: "active",
       generatedAt: "2026-05-16T02:05:33.000Z",
       disabledAt: null,
-      previewUrl: placeholderQrDataUrl("示例用户一"),
-      downloadUrl: placeholderQrDataUrl("示例用户一"),
+      previewUrl: placeholderQrDataUrl("南山咖啡·科技园店"),
+      downloadUrl: placeholderQrDataUrl("南山咖啡·科技园店"),
       provider: "local-placeholder",
     },
   },
   {
-    createdById: null,
-    ownerId: null,
+    merchantId: DEFAULT_MERCHANT_ID,
     id: "store-wanxiang",
-    name: "示例用户二",
-    shortName: "示例二",
+    name: "拾光书店·万象店",
+    shortName: "万象店",
     logoUrl: null,
     address: "广东省深圳市罗湖区宝安南路 1881 号",
     contactName: "李经理",
     contactPhone: "0755-8888-1234",
+    notes: null,
     status: "disabled",
     adEnabled: false,
     hasWifi: true,
@@ -114,6 +97,7 @@ let stores: StoreDetail[] = [
     createdAt: "2026-06-02T03:10:00.000Z",
     updatedAt: "2026-07-11T01:48:00.000Z",
     wifi: {
+      id: crypto.randomUUID(),
       configured: true,
       ssid: "TimeBook-FreeWiFi",
       passwordMasked: "••••••••",
@@ -125,33 +109,35 @@ let stores: StoreDetail[] = [
     },
     qrCode: {
       id: "qr-wanxiang",
+      wifiId: null,
       storeId: "store-wanxiang",
       sceneToken: "2de469d5b7f74ae784eaec82d7d9d780",
       status: "disabled",
       generatedAt: "2026-06-02T03:20:00.000Z",
       disabledAt: "2026-07-11T01:48:00.000Z",
-      previewUrl: placeholderQrDataUrl("示例用户二"),
-      downloadUrl: placeholderQrDataUrl("示例用户二"),
+      previewUrl: placeholderQrDataUrl("拾光书店·万象店"),
+      downloadUrl: placeholderQrDataUrl("拾光书店·万象店"),
       provider: "local-placeholder",
     },
   },
   {
-    createdById: null,
-    ownerId: null,
+    merchantId: DEFAULT_MERCHANT_ID,
     id: "store-futian",
-    name: "示例用户三",
-    shortName: "示例三",
+    name: "春风面馆·福田店",
+    shortName: "福田店",
     logoUrl: null,
     address: "广东省深圳市福田区福华一路 88 号",
     contactName: "王师傅",
     contactPhone: "136 0000 1122",
+    notes: null,
     status: "active",
-    adEnabled: true,
+    adEnabled: false,
     hasWifi: false,
     qrCodeStatus: null,
     createdAt: "2026-07-01T06:30:00.000Z",
     updatedAt: "2026-07-11T00:59:00.000Z",
     wifi: {
+      id: crypto.randomUUID(),
       configured: false,
       ssid: null,
       passwordMasked: null,
@@ -201,15 +187,14 @@ let logs: OperationLog[] = [
 function summary(store: StoreDetail): StoreSummary {
   return {
     id: store.id,
-    createdById: store.createdById,
-    createdByUsername: store.createdByUsername ?? null,
-    ownerId: store.ownerId,
+    merchantId: store.merchantId,
     name: store.name,
     shortName: store.shortName,
     logoUrl: store.logoUrl,
     address: store.address,
     contactName: store.contactName,
     contactPhone: store.contactPhone,
+    notes: store.notes,
     status: store.status,
     adEnabled: store.adEnabled,
     hasWifi: store.hasWifi,
@@ -236,79 +221,128 @@ function addLog(action: string, resourceType: string, resourceId: string): void 
 }
 
 function getRequiredStore(id: string): StoreDetail {
-  const store = visibleStores().find((item) => item.id === id);
-  if (!store) throw new Error("用户不存在");
+  const store = stores.find((item) => item.id === id);
+  if (!store) throw new Error("门店不存在");
   return store;
 }
 
+const merchants: MerchantResponse[] = [
+  {
+    id: DEFAULT_MERCHANT_ID,
+    name: "默认商户",
+    contact: null,
+    status: "active",
+    createdAt: DEMO_NOW,
+    updatedAt: DEMO_NOW,
+  },
+];
+const extraNetworks = new Map<string, WifiNetworkResponse[]>();
+
 export const demoApi = {
-  async listAccounts(): Promise<AccountSummary[]> {
-    requireDemoAdmin();
+  async listMerchants(): Promise<MerchantResponse[]> {
     await sleep();
-    return structuredClone(accounts);
+    return structuredClone(merchants);
   },
-  async createOperator(username: string, password: string): Promise<AccountSummary> {
-    requireDemoAdmin();
+  async saveMerchant(
+    payload: { name: string; contact: string | null; status: StoreStatus },
+    id?: string,
+  ): Promise<MerchantResponse> {
     await sleep();
-    if (accounts.some((item) => item.username.toLowerCase() === username.toLowerCase()))
-      throw new Error("用户名已存在");
-    const account: AccountSummary = {
-      id: crypto.randomUUID(),
-      username,
-      role: "operator",
-      status: "active",
-      createdAt: new Date().toISOString(),
-      lastLoginAt: null,
+    const row = id
+      ? merchants.find((item) => item.id === id)
+      : {
+          id: crypto.randomUUID(),
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          ...payload,
+        };
+    if (!row) throw new Error("商户不存在");
+    Object.assign(row, payload, { updatedAt: new Date().toISOString() });
+    if (!id) merchants.push(row);
+    return structuredClone(row);
+  },
+  async listNetworks(storeId: string): Promise<WifiNetworkResponse[]> {
+    await sleep();
+    const store = getRequiredStore(storeId);
+    return structuredClone([
+      ...(store.wifi.configured ? [{ ...store.wifi, qrCode: store.qrCode }] : []),
+      ...(extraNetworks.get(storeId) ?? []),
+    ]);
+  },
+  async saveNetwork(
+    storeId: string,
+    payload: WifiPayload,
+    wifiId?: string,
+  ): Promise<WifiStatusResponse> {
+    const store = getRequiredStore(storeId);
+    if (store.wifi.id === wifiId || !store.wifi.configured)
+      return this.updateWifi(storeId, payload);
+    const list = extraNetworks.get(storeId) ?? [];
+    const existing = list.find((row) => row.id === wifiId);
+    const row: WifiNetworkResponse = {
+      id: wifiId ?? crypto.randomUUID(),
+      configured: true,
+      ssid: payload.ssid,
+      passwordMasked: "••••••••",
+      bssid: payload.bssid ?? null,
+      securityType: payload.securityType ?? null,
+      status: payload.status ?? "active",
+      version: (existing?.version ?? 0) + 1,
+      updatedAt: new Date().toISOString(),
+      qrCode: existing?.qrCode ?? null,
     };
-    accounts.push(account);
-    accountPasswords.set(account.id, password);
-    return structuredClone(account);
+    if (existing) Object.assign(existing, row);
+    else list.push(row);
+    extraNetworks.set(storeId, list);
+    return structuredClone(row);
   },
-  async setAccountStatus(id: string, status: "active" | "disabled"): Promise<AccountSummary> {
-    requireDemoAdmin();
+  async setNetworkStatus(
+    storeId: string,
+    wifiId: string,
+    status: StoreStatus,
+  ): Promise<WifiStatusResponse> {
     await sleep();
-    const account = accounts.find((item) => item.id === id && item.role === "operator");
-    if (!account) throw new Error("同仁账号不存在");
-    account.status = status;
-    return structuredClone(account);
+    const store = getRequiredStore(storeId);
+    const row =
+      store.wifi.id === wifiId
+        ? store.wifi
+        : (extraNetworks.get(storeId) ?? []).find((item) => item.id === wifiId);
+    if (!row) throw new Error("Wi-Fi 不存在");
+    row.status = status;
+    return structuredClone(row);
   },
-  async resetAccountPassword(id: string, password: string): Promise<AccountSummary> {
-    requireDemoAdmin();
-    await sleep();
-    const account = accounts.find((item) => item.id === id && item.role === "operator");
-    if (!account) throw new Error("同仁账号不存在");
-    accountPasswords.set(id, password);
-    return structuredClone(account);
-  },
-  async transferStore(id: string, ownerId: string | null, reason: string): Promise<void> {
-    requireDemoAdmin();
-    await sleep();
-    if (!reason.trim()) throw new Error("请填写转移原因");
-    getRequiredStore(id).ownerId = ownerId;
-    addLog("store.transfer", "store", id);
-  },
-  async changePassword(currentPassword: string, newPassword: string): Promise<void> {
-    await sleep();
-    if (accountPasswords.get(currentAccount.id) !== currentPassword)
-      throw new Error("当前密码错误");
-    accountPasswords.set(currentAccount.id, newPassword);
-    authenticated = false;
+  async analytics(query: {
+    merchantId?: string;
+    storeId?: string;
+    wifiId?: string;
+    from: string;
+    to: string;
+  }): Promise<AnalyticsRow[]> {
+    const selected = stores.filter(
+      (store) =>
+        (!query.merchantId || store.merchantId === query.merchantId) &&
+        (!query.storeId || store.id === query.storeId),
+    );
+    return Promise.all(
+      selected.map(async (store) => ({
+        date: query.from.slice(0, 10),
+        merchantId: store.merchantId,
+        storeId: store.id,
+        wifiId: store.wifi.id,
+        ssid: store.wifi.ssid,
+        totals: (await this.statistics(store.id)).totals,
+      })),
+    ).then((rows) => rows.filter((row) => !query.wifiId || row.wifiId === query.wifiId));
   },
   async login(username: string, password: string): Promise<AdminSession> {
     await sleep();
-    const account = accounts.find((item) => item.username.toLowerCase() === username.toLowerCase());
-    if (!account || account.status !== "active" || accountPasswords.get(account.id) !== password) {
+    if (username !== "admin" || password !== "Admin123!") {
       throw new Error("用户名或密码不正确");
     }
-    currentAccount = account;
     authenticated = true;
     return {
       authenticated: true,
-      admin: {
-        id: currentAccount.id,
-        username: currentAccount.username,
-        role: currentAccount.role,
-      },
+      admin: { id: "admin-1", username: "admin" },
       expiresAt: "2026-07-12T14:32:18.000Z",
     };
   },
@@ -317,11 +351,7 @@ export const demoApi = {
     if (!authenticated) throw new Error("UNAUTHENTICATED");
     return {
       authenticated: true,
-      admin: {
-        id: currentAccount.id,
-        username: currentAccount.username,
-        role: currentAccount.role,
-      },
+      admin: { id: "admin-1", username: "admin" },
       expiresAt: "2026-07-12T14:32:18.000Z",
     };
   },
@@ -330,12 +360,10 @@ export const demoApi = {
     authenticated = false;
   },
   async dashboard(): Promise<DashboardResponse> {
-    requireDemoAdmin();
     await sleep();
     return {
-      storeTotal: visibleStores().length,
-      activeQrCodeTotal: visibleStores().filter((store) => store.qrCode?.status === "active")
-        .length,
+      storeTotal: stores.length,
+      activeQrCodeTotal: stores.filter((store) => store.qrCode?.status === "active").length,
       today: {
         pageViews: 6842,
         connectClicks: 5940,
@@ -363,7 +391,7 @@ export const demoApi = {
   async listStores(query: StoreListQuery): Promise<PaginatedResponse<StoreSummary>> {
     await sleep();
     const search = query.search?.trim().toLowerCase() ?? "";
-    const filtered = visibleStores().filter((store) => {
+    const filtered = stores.filter((store) => {
       const matchesSearch =
         !search ||
         [store.name, store.shortName, store.address].some((value) =>
@@ -392,22 +420,22 @@ export const demoApi = {
     const now = new Date().toISOString();
     const store: StoreDetail = {
       id,
-      createdById: currentAccount.id,
-      createdByUsername: currentAccount.username,
-      ownerId: currentAccount.id,
+      merchantId: payload.merchantId ?? DEFAULT_MERCHANT_ID,
       name: payload.name,
       shortName: payload.shortName ?? null,
       logoUrl: payload.logoUrl ?? null,
       address: payload.address ?? null,
       contactName: payload.contactName ?? null,
       contactPhone: payload.contactPhone ?? null,
-      status: currentAccount.role === "admin" ? (payload.status ?? "active") : "active",
-      adEnabled: currentAccount.role === "admin" ? payload.adEnabled : false,
+      notes: payload.notes ?? null,
+      status: payload.status ?? "active",
+      adEnabled: payload.adEnabled,
       hasWifi: false,
       qrCodeStatus: null,
       createdAt: now,
       updatedAt: now,
       wifi: {
+        id: crypto.randomUUID(),
         configured: false,
         ssid: null,
         passwordMasked: null,
@@ -424,7 +452,6 @@ export const demoApi = {
     return structuredClone(store);
   },
   async updateStore(id: string, payload: StorePayload): Promise<StoreDetail> {
-    requireDemoAdmin();
     await sleep();
     const store = getRequiredStore(id);
     Object.assign(store, payload, {
@@ -434,7 +461,6 @@ export const demoApi = {
     return structuredClone(store);
   },
   async setStoreStatus(id: string, status: StoreStatus): Promise<StoreDetail> {
-    requireDemoAdmin();
     await sleep();
     const store = getRequiredStore(id);
     store.status = status;
@@ -449,15 +475,8 @@ export const demoApi = {
   async updateWifi(id: string, payload: WifiPayload): Promise<WifiStatusResponse> {
     await sleep();
     const store = getRequiredStore(id);
-    if (
-      currentAccount.role !== "admin" &&
-      (store.createdById !== currentAccount.id ||
-        store.wifi.configured ||
-        store.status !== "active" ||
-        payload.status === "disabled")
-    )
-      throw new Error("同仁只能配置初始 Wi-Fi");
     store.wifi = {
+      id: store.wifi.id ?? crypto.randomUUID(),
       configured: true,
       ssid: payload.ssid,
       passwordMasked: "••••••••",
@@ -476,16 +495,14 @@ export const demoApi = {
     await sleep();
     return structuredClone(getRequiredStore(storeId).qrCode);
   },
-  async generateQrCode(storeId: string): Promise<QrCodeResponse> {
+  async generateQrCode(storeId: string, wifiId?: string): Promise<QrCodeResponse> {
     await sleep();
     const store = getRequiredStore(storeId);
-    if (currentAccount.role !== "admin" && store.qrCode)
-      throw new Error("已有二维码，请联系主账号管理");
     const dataUrl = placeholderQrDataUrl(store.name);
     const qr: QrCodeResponse = {
       id: `qr-${crypto.randomUUID()}`,
       storeId,
-      createdByUsername: currentAccount.username,
+      wifiId: wifiId ?? store.wifi.id,
       sceneToken: crypto.randomUUID().replaceAll("-", ""),
       status: "active",
       generatedAt: new Date().toISOString(),
@@ -494,16 +511,25 @@ export const demoApi = {
       downloadUrl: dataUrl,
       provider: "local-placeholder",
     };
+    const extra = (extraNetworks.get(storeId) ?? []).find((row) => row.id === wifiId);
+    if (extra) {
+      extra.qrCode = qr;
+      return structuredClone(qr);
+    }
     store.qrCode = qr;
     store.qrCodeStatus = "active";
     addLog("qrcode.generate", "qrcode", qr.id);
     return structuredClone(qr);
   },
   async setQrCodeStatus(qrId: string, status: QrCodeStatus): Promise<QrCodeResponse> {
-    requireDemoAdmin();
     await sleep();
     const store = stores.find((item) => item.qrCode?.id === qrId);
-    if (!store?.qrCode) throw new Error("二维码不存在");
+    if (!store?.qrCode) {
+      const extra = [...extraNetworks.values()].flat().find((row) => row.qrCode?.id === qrId);
+      if (!extra?.qrCode) throw new Error("二维码不存在");
+      extra.qrCode.status = status;
+      return structuredClone(extra.qrCode);
+    }
     store.qrCode.status = status;
     store.qrCode.disabledAt = status === "active" ? null : new Date().toISOString();
     store.qrCodeStatus = store.qrCode.status;
@@ -511,13 +537,15 @@ export const demoApi = {
     return structuredClone(store.qrCode);
   },
   async statistics(storeId: string): Promise<StoreStatistics> {
-    requireDemoAdmin();
     await sleep();
     getRequiredStore(storeId);
     return {
       range: { from: "2026-07-05", to: "2026-07-11" },
       totals: {
         pageViews: 12_840,
+        uniqueVisitors: 9300,
+        scans: 12200,
+        passwordCopies: 360,
         adLoadSuccesses: 10_294,
         adLoadFailures: 218,
         connectClicks: 8_410,
@@ -533,7 +561,6 @@ export const demoApi = {
     };
   },
   async operationLogs(query: OperationLogQuery): Promise<PaginatedResponse<OperationLog>> {
-    requireDemoAdmin();
     await sleep();
     const search = query.search?.trim().toLowerCase() ?? "";
     const filtered = logs.filter((log) => {
@@ -556,12 +583,10 @@ export const demoApi = {
     };
   },
   async settings(): Promise<SystemSettings> {
-    requireDemoAdmin();
     await sleep();
     return structuredClone(settings);
   },
   async updateSettings(globalAdEnabled: boolean): Promise<SystemSettings> {
-    requireDemoAdmin();
     await sleep();
     settings = { ...settings, globalAdEnabled };
     addLog("settings.update", "system_settings", "global_ad_enabled");

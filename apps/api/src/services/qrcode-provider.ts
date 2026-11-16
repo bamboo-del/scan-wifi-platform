@@ -1,11 +1,11 @@
 import { z } from "zod";
-import { serviceUnavailable } from "../lib/errors.js";
+import { AppError, serviceUnavailable } from "../lib/errors.js";
 import { sanitizeExternalError } from "../lib/redaction.js";
 
 export interface GeneratedQrCode {
   content: Buffer;
-  contentType: "image/png" | "image/jpeg" | "image/svg+xml";
-  extension: "png" | "jpg" | "svg";
+  contentType: "image/png" | "image/svg+xml";
+  extension: "png" | "svg";
 }
 
 export interface QrCodeProvider {
@@ -26,25 +26,6 @@ const wechatErrorSchema = z.object({ errcode: z.number(), errmsg: z.string().opt
 const invalidAccessTokenCodes = new Set([40014, 42001]);
 const pngSignature = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 const maxQrCodeBytes = 10 * 1024 * 1024;
-
-async function readLimitedResponse(response: Response, maxBytes: number): Promise<Buffer> {
-  const reader = response.body?.getReader();
-  if (!reader) throw new Error("WeChat response body is missing");
-  const chunks: Uint8Array[] = [];
-  let size = 0;
-  try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) return Buffer.concat(chunks, size);
-      size += value.byteLength;
-      if (size > maxBytes) throw new Error("WeChat response body exceeds its size limit");
-      chunks.push(value);
-    }
-  } finally {
-    await reader.cancel().catch(() => undefined);
-    reader.releaseLock();
-  }
-}
 
 type WeChatQrAttempt =
   | { ok: true; generated: GeneratedQrCode }
@@ -120,39 +101,6 @@ function isValidPng(content: Buffer): boolean {
   return false;
 }
 
-function isValidJpeg(content: Buffer): boolean {
-  if (
-    content.length < 4 ||
-    content.length > maxQrCodeBytes ||
-    content.readUInt16BE(0) !== 0xffd8 ||
-    content.readUInt16BE(content.length - 2) !== 0xffd9
-  )
-    return false;
-
-  let offset = 2;
-  let sawFrame = false;
-  while (offset + 4 < content.length) {
-    if (content[offset] !== 0xff) return false;
-    while (content[offset] === 0xff) offset += 1;
-    const marker = content[offset++];
-    if (offset + 2 > content.length) return false;
-    const length = content.readUInt16BE(offset);
-    if (length < 2 || offset + length > content.length - 2) return false;
-    if (marker === 0xc0 || marker === 0xc1 || marker === 0xc2) {
-      if (
-        length < 8 ||
-        content.readUInt16BE(offset + 3) === 0 ||
-        content.readUInt16BE(offset + 5) === 0
-      )
-        return false;
-      sawFrame = true;
-    }
-    if (marker === 0xda) return sawFrame && length >= 6 && offset + length < content.length - 2;
-    offset += length;
-  }
-  return false;
-}
-
 function parseWechatErrorCode(content: Buffer): number | null {
   try {
     const parsed = wechatErrorSchema.safeParse(JSON.parse(content.toString("utf8")));
@@ -194,12 +142,8 @@ export class WeChatAccessTokenCache {
       url.searchParams.set("grant_type", "client_credential");
       url.searchParams.set("appid", this.appId);
       url.searchParams.set("secret", this.appSecret);
-      const response = await this.fetchImplementation(url, {
-        signal: AbortSignal.timeout(8_000),
-        redirect: "error",
-      });
-      const content = await readLimitedResponse(response, 64 * 1024);
-      const parsed = tokenResponseSchema.safeParse(JSON.parse(content.toString("utf8")));
+      const response = await this.fetchImplementation(url, { signal: AbortSignal.timeout(8_000) });
+      const parsed = tokenResponseSchema.safeParse(await response.json());
       if (!response.ok || !parsed.success)
         throw new Error("WeChat access token response was rejected");
       this.cached = {
@@ -238,10 +182,17 @@ export class WeChatQRCodeProvider implements QrCodeProvider {
           token = await this.tokenCache.get();
           continue;
         }
+        if (result.errorCode === 41030) {
+          throw serviceUnavailable(
+            "WECHAT_QR_PAGE_UNAVAILABLE",
+            "小程序连接页尚未发布，请在微信后台发布包含 pages/connect/index 的版本后重新生成二维码。",
+          );
+        }
         throw new Error(`WeChat QR response rejected (${result.errorCode ?? result.status})`);
       }
       throw new Error("WeChat QR response retry limit exceeded");
     } catch (error) {
+      if (error instanceof AppError) throw error;
       throw serviceUnavailable("WECHAT_QR_UNAVAILABLE", sanitizeExternalError(error));
     }
   }
@@ -255,25 +206,20 @@ export class WeChatQRCodeProvider implements QrCodeProvider {
         body: JSON.stringify({
           scene: sceneToken,
           page: this.page,
-          check_path: true,
+          check_path: this.envVersion === "release",
           env_version: this.envVersion,
           width: 430,
         }),
         signal: AbortSignal.timeout(12_000),
-        redirect: "error",
       },
     );
-    const content = await readLimitedResponse(response, maxQrCodeBytes);
+    const content = Buffer.from(await response.arrayBuffer());
     const contentType = (response.headers.get("content-type") ?? "")
       .split(";", 1)[0]
       ?.trim()
       .toLowerCase();
-    if (!response.ok || (contentType !== "image/png" && contentType !== "image/jpeg")) {
+    if (!response.ok || contentType !== "image/png") {
       return { ok: false, errorCode: parseWechatErrorCode(content), status: response.status };
-    }
-    if (contentType === "image/jpeg") {
-      if (!isValidJpeg(content)) throw new Error("WeChat QR response is not a valid JPEG image");
-      return { ok: true, generated: { content, contentType, extension: "jpg" } };
     }
     if (!isValidPng(content)) throw new Error("WeChat QR response is not a valid PNG image");
     return { ok: true, generated: { content, contentType: "image/png", extension: "png" } };

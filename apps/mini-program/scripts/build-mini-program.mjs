@@ -89,6 +89,9 @@ try {
   await copyRuntimeFiles(stagingRoot, artifactRoot);
 
   if (productionMode) {
+    for (const directory of ["manage", "success"]) {
+      await rm(path.join(artifactRoot, "pages", directory), { recursive: true, force: true });
+    }
     await rm(path.join(artifactRoot, "pages", "wifi-diagnostics"), {
       recursive: true,
       force: true,
@@ -96,11 +99,7 @@ try {
     await rm(path.join(artifactRoot, "core", "wifi-diagnostics.js"), { force: true });
   }
 
-  const summary = await verifyMiniProgramArtifact({
-    packageRoot,
-    mode,
-    legacyWifiApiEnabled: process.env.MINIPROGRAM_ENABLE_LEGACY_WIFI_API === "true",
-  });
+  const summary = await verifyMiniProgramArtifact({ packageRoot, mode });
   process.stdout.write(
     `Built runnable ${summary.mode} mini-program artifact in ${path.relative(
       packageRoot,

@@ -1,0 +1,20 @@
+<view class="manage-page">
+  <view wx:if="{{spot}}" class="card">
+    <view class="heading">{{spot.shopName}}</view><view>{{spot.spotName}} · {{spot.ssid}}</view>
+    <view class="muted">{{spot.status === 'active' ? '已启用' : '已暂停'}} · 连接 {{spot.connectCount}} 次</view>
+    <view class="muted">创建：{{createdTime}}</view><view class="muted">贴纸 ID：{{spot.shortId}}</view>
+  </view>
+  <view wx:if="{{error}}" class="error">{{error}}</view>
+  <button wx:if="{{!spot}}" bindtap="reload" disabled="{{busy}}">重试</button>
+  <image wx:if="{{imagePath}}" class="qr" src="{{imagePath}}" mode="aspectFit" bindtap="onPreview" />
+  <view wx:if="{{spot.qrProvider === 'local-placeholder'}}" class="error">当前为本地占位码，不能作为门店贴纸；请联系服务方开通微信制码。</view>
+  <button bindtap="onGenerate" loading="{{busy}}" disabled="{{busy || !spot}}">{{spot.qrFileId ? '重新生成图片（保留贴纸 ID）' : '生成微信小程序码'}}</button>
+  <button wx:if="{{imagePath}}" bindtap="onSaveImage">保存小程序码到相册</button>
+  <button wx:if="{{imagePath}}" bindtap="onPoster">制作打印海报</button>
+  <image wx:if="{{posterPath}}" class="poster" src="{{posterPath}}" mode="widthFix" />
+  <button wx:if="{{posterPath}}" bindtap="onSavePoster">保存高清海报 PNG</button>
+  <button bindtap="onEdit" disabled="{{busy || !spot}}">编辑 / 更新密码</button>
+  <button bindtap="onToggle" disabled="{{busy || !spot}}">{{spot.status === 'active' ? '暂停 WiFi 贴' : '恢复 WiFi 贴'}}</button>
+  <button class="danger" bindtap="onDelete" disabled="{{busy || !spot}}">删除 WiFi 贴</button>
+  <canvas canvas-id="wifi-poster" style="position:fixed;left:-2000px;width:600px;height:750px;" />
+</view>

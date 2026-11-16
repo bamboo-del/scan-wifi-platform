@@ -14,6 +14,7 @@ import type {
 export function presentWifi(wifi: WifiRecord | null): WifiStatusResponse {
   if (!wifi) {
     return {
+      id: null,
       configured: false,
       ssid: null,
       passwordMasked: null,
@@ -25,6 +26,7 @@ export function presentWifi(wifi: WifiRecord | null): WifiStatusResponse {
     };
   }
   return {
+    id: wifi.id,
     configured: true,
     ssid: wifi.ssid,
     passwordMasked: "••••••••",
@@ -40,8 +42,8 @@ export function presentQrCode(qrCode: QrCodeRecord): QrCodeResponse {
   const endpoint = `/api/admin/qrcodes/${qrCode.id}/download`;
   return {
     id: qrCode.id,
-    createdByUsername: qrCode.createdByUsername ?? null,
     storeId: qrCode.storeId,
+    wifiId: qrCode.wifiId,
     sceneToken: qrCode.sceneToken,
     status: qrCode.status,
     generatedAt: qrCode.generatedAt.toISOString(),
@@ -55,20 +57,18 @@ export function presentQrCode(qrCode: QrCodeRecord): QrCodeResponse {
 export function presentStoreSummary(store: StoreListRecord): StoreSummary {
   return {
     id: store.id,
-    createdById: store.createdById,
-    createdByUsername: store.createdByUsername ?? null,
-    ownerId: store.ownerId,
+    merchantId: store.merchantId,
     name: store.name,
     shortName: store.shortName,
     logoUrl: store.logoUrl,
     address: store.address,
     contactName: store.contactName,
     contactPhone: store.contactPhone,
+    notes: store.notes,
     status: store.status,
     adEnabled: store.adEnabled,
     hasWifi: store.hasWifi,
     qrCodeStatus: store.qrCodeStatus,
-    qrCode: store.qrCode ? presentQrCode(store.qrCode) : null,
     createdAt: store.createdAt.toISOString(),
     updatedAt: store.updatedAt.toISOString(),
   };

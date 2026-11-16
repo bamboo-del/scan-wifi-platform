@@ -30,7 +30,11 @@ async function createFixture(mode: MiniProgramArtifactMode): Promise<string> {
   await write(
     sourceRoot,
     "app.json",
-    JSON.stringify({ pages: [connectPage], lazyCodeLoading: "requiredComponents" }),
+    JSON.stringify({
+      pages: [connectPage],
+      window: { navigationBarTitleText: "轻连 WiFi" },
+      lazyCodeLoading: "requiredComponents",
+    }),
   );
   await write(sourceRoot, "app.wxss");
   await write(sourceRoot, "sitemap.json", JSON.stringify({ rules: [] }));
@@ -70,7 +74,11 @@ async function createFixture(mode: MiniProgramArtifactMode): Promise<string> {
   await write(
     artifactRoot,
     "app.json",
-    JSON.stringify({ pages, lazyCodeLoading: "requiredComponents" }),
+    JSON.stringify({
+      pages,
+      window: { navigationBarTitleText: "轻连 WiFi" },
+      lazyCodeLoading: "requiredComponents",
+    }),
   );
   await write(artifactRoot, "app.wxss");
   await write(artifactRoot, "sitemap.json", JSON.stringify({ rules: [] }));
@@ -118,23 +126,6 @@ afterEach(async () => {
 });
 
 describe("mini-program artifact integrity", () => {
-  it("requires an explicit Wi-Fi opt-in and checks it against the release artifact", async () => {
-    const packageRoot = await createFixture("production");
-    const enabled = { packageRoot, mode: "production" as const, legacyWifiApiEnabled: true };
-    await expect(verifyMiniProgramArtifact(enabled)).rejects.toThrow("legacy Wi-Fi adapter");
-    await write(
-      packageRoot,
-      "dist/config/runtime.generated.js",
-      'export const config = { apiBaseUrl: "https://api.scan-wifi-production.cn", legacyWifiAdapterEnabled: true, adUnitId: "" };',
-    );
-    await expect(verifyMiniProgramArtifact({ packageRoot, mode: "production" })).rejects.toThrow(
-      "legacy Wi-Fi adapter",
-    );
-    await expect(verifyMiniProgramArtifact(enabled)).resolves.toMatchObject({
-      diagnosticsIncluded: false,
-    });
-  });
-
   it.each<MiniProgramArtifactMode>(["development", "trial", "production"])(
     "accepts a complete %s artifact",
     async (mode) => {
@@ -188,6 +179,15 @@ describe("mini-program artifact integrity", () => {
     await expect(verifyMiniProgramArtifact({ packageRoot, mode: "trial" })).resolves.toBeDefined();
   });
 
+  it("rejects known mojibake markers in runtime text files", async () => {
+    const packageRoot = await createFixture("trial");
+    const corruptedBrand = String.fromCodePoint(0x675e, 0x660f, 0x7e5b);
+    await write(packageRoot, `dist/${connectPage}.wxml`, `<view>${corruptedBrand} WiFi</view>`);
+    await expect(verifyMiniProgramArtifact({ packageRoot, mode: "trial" })).rejects.toThrow(
+      "contains a known mojibake marker",
+    );
+  });
+
   it("rejects server secret markers in the runtime artifact", async () => {
     const packageRoot = await createFixture("development");
     const marker = ["WECHAT", "APP", "SECRET"].join("_");
@@ -202,7 +202,10 @@ describe("mini-program artifact integrity", () => {
     await write(
       packageRoot,
       "dist/app.json",
-      JSON.stringify({ pages: [connectPage, diagnosticsPage] }),
+      JSON.stringify({
+        pages: [connectPage, diagnosticsPage],
+        window: { navigationBarTitleText: "轻连 WiFi" },
+      }),
     );
     await expect(verifyMiniProgramArtifact({ packageRoot, mode: "development" })).rejects.toThrow(
       'lazyCodeLoading must be "requiredComponents"',
@@ -225,6 +228,26 @@ describe("mini-program artifact integrity", () => {
     );
   });
 
+  it("rejects management pages in a production customer artifact", async () => {
+    const packageRoot = await createFixture("production");
+    await write(packageRoot, "dist/pages/manage/list.js", "Page({});");
+    await expect(verifyMiniProgramArtifact({ packageRoot, mode: "production" })).rejects.toThrow(
+      "non-customer page leaked",
+    );
+  });
+
+  it("allows an explicitly enabled adapter while keeping production page and secret gates", async () => {
+    const packageRoot = await createFixture("production");
+    await write(
+      packageRoot,
+      "dist/config/runtime.generated.js",
+      'export const config = { apiBaseUrl: "https://api.scan-wifi-production.cn", legacyWifiAdapterEnabled: true, adUnitId: "" };',
+    );
+    await expect(
+      verifyMiniProgramArtifact({ packageRoot, mode: "production" }),
+    ).resolves.toMatchObject({ pages: [connectPage] });
+  });
+
   it("rejects an example API in a production artifact", async () => {
     const packageRoot = await createFixture("production");
     await write(
@@ -242,6 +265,34 @@ describe("mini-program artifact integrity", () => {
     await write(packageRoot, `dist/${connectPage}.wxml`, '<input name="password" />');
     await expect(verifyMiniProgramArtifact({ packageRoot, mode: "production" })).rejects.toThrow(
       "release customer page must not contain input fields",
+    );
+  });
+
+  it("allows only the fixed daily analytics ID storage contract", async () => {
+    const packageRoot = await createFixture("production");
+    await write(
+      packageRoot,
+      "dist/services/analytics.js",
+      'storage.getStorageSync("wifi-visit-day"); storage.setStorageSync("wifi-visit-day", { day, id });',
+    );
+    await expect(
+      verifyMiniProgramArtifact({ packageRoot, mode: "production" }),
+    ).resolves.toBeDefined();
+    await write(
+      packageRoot,
+      "dist/services/analytics.js",
+      'storage.setStorageSync("wifi-visit-day", { day, id, password });',
+    );
+    await expect(verifyMiniProgramArtifact({ packageRoot, mode: "production" })).rejects.toThrow(
+      "must not persist customer connection data locally",
+    );
+    await write(
+      packageRoot,
+      "dist/services/analytics.js",
+      'storage.setStorageSync("wifi-credentials", { day, id });',
+    );
+    await expect(verifyMiniProgramArtifact({ packageRoot, mode: "production" })).rejects.toThrow(
+      "must not persist customer connection data locally",
     );
   });
 

@@ -1,26 +1,24 @@
+import type { AnalyticsQuery } from "@scan-wifi/validation";
 import type {
-  AdminActor,
   DashboardResponse,
   PaginationResponse,
   OperationLogItem,
   StoreStatisticsResponse,
 } from "@scan-wifi/shared-types";
-import { badRequest } from "../lib/errors.js";
+import { notFound } from "../lib/errors.js";
 import { defaultStatisticsRange } from "../lib/time.js";
 import type { PlatformRepository } from "../repositories/platform-repository.js";
-
-import { requirePlatformAdmin, requireStoreAccess } from "./access-service.js";
 
 export class StatisticsService {
   public constructor(private readonly repository: PlatformRepository) {}
 
-  public async dashboard(actor: AdminActor, now = new Date()): Promise<DashboardResponse> {
-    requirePlatformAdmin(actor);
-    const aggregate = await this.repository.getDashboard(
-      now,
-      actor.role === "operator" ? actor.id : undefined,
-    );
-    const attempts = aggregate.today.connectSuccesses + aggregate.today.connectFailures;
+  public async analytics(input: AnalyticsQuery) {
+    return this.repository.getAnalytics(input);
+  }
+
+  public async dashboard(now = new Date()): Promise<DashboardResponse> {
+    const aggregate = await this.repository.getDashboard(now);
+    const attempts = aggregate.today.connectClicks;
     return {
       storeTotal: aggregate.storeTotal,
       activeQrCodeTotal: aggregate.activeQrCodeTotal,
@@ -38,17 +36,15 @@ export class StatisticsService {
 
   public async storeStatistics(
     storeId: string,
-    actor: AdminActor,
     fromValue?: string,
     toValue?: string,
   ): Promise<StoreStatisticsResponse> {
-    await requireStoreAccess(this.repository, storeId, actor);
-    requirePlatformAdmin(actor);
-    const to = toValue ? new Date(toValue) : new Date();
-    const from = fromValue ? new Date(fromValue) : defaultStatisticsRange(to).from;
-    if (from >= to) throw badRequest("VALIDATION_ERROR", "from 必须早于 to");
+    if (!(await this.repository.getStore(storeId))) throw notFound("STORE_NOT_FOUND", "门店不存在");
+    const defaults = defaultStatisticsRange(new Date());
+    const from = fromValue ? new Date(fromValue) : defaults.from;
+    const to = toValue ? new Date(toValue) : defaults.to;
     const result = await this.repository.getStoreStatistics(storeId, from, to);
-    const attempts = result.totals.connectSuccesses + result.totals.connectFailures;
+    const attempts = result.totals.connectClicks;
     return {
       range: { from: from.toISOString(), to: to.toISOString() },
       totals: {
@@ -59,17 +55,13 @@ export class StatisticsService {
     };
   }
 
-  public async operationLogs(
-    input: {
-      page: number;
-      pageSize: number;
-      search?: string;
-      action?: string;
-      resourceType?: string;
-    },
-    actor: AdminActor,
-  ): Promise<PaginationResponse<OperationLogItem>> {
-    requirePlatformAdmin(actor);
+  public async operationLogs(input: {
+    page: number;
+    pageSize: number;
+    search?: string;
+    action?: string;
+    resourceType?: string;
+  }): Promise<PaginationResponse<OperationLogItem>> {
     const result = await this.repository.listOperationLogs(input);
     return {
       items: result.items.map((item) => ({

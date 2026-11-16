@@ -3,10 +3,6 @@ const SENSITIVE_KEY =
 const INLINE_SECRET =
   /(password|passwd|pwd|secret|token|authorization|cookie)\s*[:=]\s*(?:"[^"]*"|'[^']*'|[^,;&\r\n]*)/giu;
 
-export function redactRequestUrl(url: string): string {
-  return url.split("?", 1)[0]!.replace(/(\/api\/public\/connect\/)[^/]+/u, "$1[REDACTED]");
-}
-
 export function redactSensitive(value: unknown, depth = 0): unknown {
   if (depth > 8) return "[DEPTH_LIMIT]";
   if (value === null || typeof value === "number" || typeof value === "boolean") return value;

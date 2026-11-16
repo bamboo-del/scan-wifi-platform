@@ -27,6 +27,9 @@ function createMockApi(
   connect: (options: ConnectWifiOptions) => void,
 ) {
   return {
+    getConnectedWifi: vi.fn<NonNullable<LegacyWifiWxApi["getConnectedWifi"]>>((options) =>
+      options.fail({ errMsg: "not connected" }),
+    ),
     startWifi: vi.fn(start),
     connectWifi: vi.fn(connect),
     onWifiConnected: vi.fn<(listener: WifiConnectedListener) => void>(),
@@ -40,6 +43,112 @@ afterEach(() => {
 });
 
 describe("LegacyWeChatWifiAdapter", () => {
+  it("verifies a delayed connection even when no connected event arrives", async () => {
+    vi.useFakeTimers();
+    const api = createMockApi(
+      (options) => options.success?.({ errMsg: "ok" }),
+      (options) => options.success?.({ errMsg: "ok" }),
+    );
+    const adapter = new LegacyWeChatWifiAdapter(api, {
+      enabled: true,
+      timeoutMs: 2000,
+      manualSystemConnection: false,
+    });
+    const result = adapter.connect(SETTINGS, vi.fn());
+    api.getConnectedWifi.mockImplementation((options) => options.success(CONNECTED_WIFI));
+    await vi.advanceTimersByTimeAsync(500);
+    await expect(result).resolves.toEqual({ ok: true });
+    expect(vi.getTimerCount()).toBe(0);
+    adapter.dispose();
+  });
+  it("requires a readable current SSID before offering automatic connection", () => {
+    const api = createMockApi(
+      () => undefined,
+      () => undefined,
+    );
+    const unverifiable: LegacyWifiWxApi = { ...api };
+    delete unverifiable.getConnectedWifi;
+    const adapter = new LegacyWeChatWifiAdapter(unverifiable, {
+      enabled: true,
+      timeoutMs: 100,
+      manualSystemConnection: false,
+    });
+    expect(adapter.isAvailable()).toBe(false);
+  });
+  it("sanitizes connectWifi exceptions delivered from an asynchronous precheck", async () => {
+    const api = createMockApi(
+      (options) => options.success?.({ errMsg: "ok" }),
+      () => {
+        throw new Error("platform raw error");
+      },
+    );
+    api.getConnectedWifi.mockImplementation((options) => {
+      queueMicrotask(() => options.fail({ errMsg: "not connected" }));
+    });
+    const adapter = new LegacyWeChatWifiAdapter(api, {
+      enabled: true,
+      timeoutMs: 100,
+      manualSystemConnection: false,
+    });
+    await expect(adapter.connect(SETTINGS, vi.fn())).resolves.toMatchObject({
+      ok: false,
+      error: { code: "unknown" },
+    });
+    adapter.dispose();
+  });
+  it("confirms an already connected target without calling connectWifi", async () => {
+    const api = createMockApi(
+      (options) => options.success?.({ errMsg: "ok" }),
+      () => undefined,
+    );
+    api.getConnectedWifi.mockImplementation((options) => options.success(CONNECTED_WIFI));
+    const adapter = new LegacyWeChatWifiAdapter(api, {
+      enabled: true,
+      timeoutMs: 100,
+      manualSystemConnection: false,
+    });
+    await expect(adapter.connect(SETTINGS, vi.fn())).resolves.toEqual({ ok: true });
+    expect(api.connectWifi).not.toHaveBeenCalled();
+    adapter.dispose();
+  });
+  it("rejects both accepted callback and matching event when the verified SSID differs", async () => {
+    vi.useFakeTimers();
+    const api = createMockApi(
+      (options) => options.success?.({ errMsg: "ok" }),
+      (options) => options.success?.({ errMsg: "ok" }),
+    );
+    api.getConnectedWifi.mockImplementation((options) =>
+      options.success({ wifi: { ...CONNECTED_WIFI.wifi, SSID: "Other" } }),
+    );
+    const adapter = new LegacyWeChatWifiAdapter(api, {
+      enabled: true,
+      timeoutMs: 100,
+      manualSystemConnection: false,
+    });
+    const result = adapter.connect(SETTINGS, vi.fn());
+    api.onWifiConnected.mock.calls[0]?.[0](CONNECTED_WIFI);
+    await vi.advanceTimersByTimeAsync(101);
+    await expect(result).resolves.toMatchObject({ ok: false });
+    adapter.dispose();
+  });
+  it("times out a silent startWifi call and cleans up a late start success", async () => {
+    vi.useFakeTimers();
+    const api = createMockApi(
+      () => undefined,
+      () => undefined,
+    );
+    const adapter = new LegacyWeChatWifiAdapter(api, {
+      enabled: true,
+      timeoutMs: 100,
+      manualSystemConnection: false,
+    });
+    const result = adapter.connect(SETTINGS, vi.fn());
+    await vi.advanceTimersByTimeAsync(101);
+    await expect(result).resolves.toMatchObject({ ok: false, error: { code: "client_timeout" } });
+    api.startWifi.mock.calls[0]?.[0].success?.({ errMsg: "startWifi:ok" });
+    expect(api.connectWifi).not.toHaveBeenCalled();
+    expect(api.stopWifi).toHaveBeenCalledOnce();
+  });
   it("keeps the delisted family disabled unless explicitly enabled", async () => {
     const api = createMockApi(
       () => undefined,
@@ -81,74 +190,6 @@ describe("LegacyWeChatWifiAdapter", () => {
     expect(api.connectWifi).not.toHaveBeenCalled();
   });
 
-  it("times out during initialization and cleans up a late start success", async () => {
-    vi.useFakeTimers();
-    let startOptions: WifiOperationOptions | undefined;
-    const api = createMockApi(
-      (options) => {
-        startOptions = options;
-      },
-      () => undefined,
-    );
-    const adapter = new LegacyWeChatWifiAdapter(api, {
-      enabled: true,
-      timeoutMs: 1000,
-      manualSystemConnection: false,
-    });
-    const pending = adapter.connect(SETTINGS, vi.fn());
-    await vi.advanceTimersByTimeAsync(1000);
-    await expect(pending).resolves.toMatchObject({
-      ok: false,
-      error: { code: "client_timeout" },
-    });
-    startOptions?.success?.({ errMsg: "startWifi:ok" });
-    expect(api.connectWifi).not.toHaveBeenCalled();
-    expect(api.stopWifi).toHaveBeenCalledTimes(1);
-    expect(vi.getTimerCount()).toBe(0);
-  });
-
-  it("handles a repeated start callback only once", async () => {
-    vi.useFakeTimers();
-    const api = createMockApi(
-      (options) => {
-        options.success?.({ errMsg: "startWifi:ok" });
-        options.success?.({ errMsg: "startWifi:ok" });
-      },
-      () => undefined,
-    );
-    const adapter = new LegacyWeChatWifiAdapter(api, {
-      enabled: true,
-      timeoutMs: 1000,
-      manualSystemConnection: false,
-    });
-    const pending = adapter.connect(SETTINGS, vi.fn());
-    expect(api.connectWifi).toHaveBeenCalledTimes(1);
-    adapter.dispose();
-    await pending;
-    expect(vi.getTimerCount()).toBe(0);
-  });
-
-  it("requires the configured BSSID when another access point has the same SSID", async () => {
-    let listener: WifiConnectedListener | undefined;
-    const api = createMockApi(
-      (options) => options.success?.({ errMsg: "startWifi:ok" }),
-      (options) => options.success?.({ errMsg: "connectWifi:ok" }),
-    );
-    api.onWifiConnected.mockImplementation((value) => {
-      listener = value;
-    });
-    const adapter = new LegacyWeChatWifiAdapter(api, {
-      enabled: true,
-      timeoutMs: 1000,
-      manualSystemConnection: false,
-    });
-    const pending = adapter.connect({ ...SETTINGS, bssid: "AA:BB:CC:DD:EE:FF" }, vi.fn());
-    listener?.(CONNECTED_WIFI);
-    expect(api.offWifiConnected).not.toHaveBeenCalled();
-    listener?.({ wifi: { ...CONNECTED_WIFI.wifi, BSSID: "aa:bb:cc:dd:ee:ff" } });
-    await expect(pending).resolves.toEqual({ ok: true });
-  });
-
   it("waits for a matching Wi-Fi event after connectWifi accepts the request", async () => {
     let listener: WifiConnectedListener | null = null;
     const api = createMockApi(
@@ -184,6 +225,7 @@ describe("LegacyWeChatWifiAdapter", () => {
     expect(api.connectWifi.mock.calls[0]?.[0]).not.toHaveProperty("BSSID");
 
     const connectedListener = listener as unknown as WifiConnectedListener;
+    api.getConnectedWifi.mockImplementation((options) => options.success(CONNECTED_WIFI));
     connectedListener(CONNECTED_WIFI);
     await expect(pending).resolves.toEqual({ ok: true });
     expect(api.offWifiConnected).toHaveBeenCalledWith(connectedListener);
@@ -214,6 +256,7 @@ describe("LegacyWeChatWifiAdapter", () => {
     expect(settled).toBe(false);
     expect(api.connectWifi).toHaveBeenCalledWith(expect.objectContaining({ maunal: true }));
     const connectedListener = listener as unknown as WifiConnectedListener;
+    api.getConnectedWifi.mockImplementation((options) => options.success(CONNECTED_WIFI));
     connectedListener(CONNECTED_WIFI);
     await expect(pending).resolves.toEqual({ ok: true });
   });
@@ -253,6 +296,7 @@ describe("LegacyWeChatWifiAdapter", () => {
     const result = adapter.connect(SETTINGS, vi.fn());
     expect(listener).not.toBeNull();
     const connectedListener = listener as unknown as WifiConnectedListener;
+    api.getConnectedWifi.mockImplementation((options) => options.success(CONNECTED_WIFI));
     connectedListener(CONNECTED_WIFI);
 
     await expect(result).resolves.toEqual({ ok: true });
@@ -275,7 +319,9 @@ describe("LegacyWeChatWifiAdapter", () => {
 
     const pending = adapter.connect(SETTINGS, vi.fn());
     const connectedListener = listener as unknown as WifiConnectedListener;
+    api.getConnectedWifi.mockImplementation((options) => options.success(CONNECTED_WIFI));
     connectedListener(CONNECTED_WIFI);
+    api.getConnectedWifi.mockImplementation((options) => options.success(CONNECTED_WIFI));
     connectedListener(CONNECTED_WIFI);
 
     await expect(pending).resolves.toEqual({ ok: true });

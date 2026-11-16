@@ -5,9 +5,9 @@ import CircleCheckBig from "lucide-react/dist/esm/icons/circle-check-big";
 import QrCode from "lucide-react/dist/esm/icons/qr-code";
 import RefreshCw from "lucide-react/dist/esm/icons/refresh-cw";
 import ScanLine from "lucide-react/dist/esm/icons/scan-line";
-import UserRound from "lucide-react/dist/esm/icons/user-round";
+import Store from "lucide-react/dist/esm/icons/store";
 import Wifi from "lucide-react/dist/esm/icons/wifi";
-import { Link } from "react-router-dom";
+import { Link } from "react-router";
 import {
   CartesianGrid,
   Legend,
@@ -124,7 +124,7 @@ export default function DashboardPage(): React.JSX.Element {
     <div className="flex flex-col gap-6">
       <PageHeader
         title="仪表盘"
-        description="查看用户服务状态、今日连接表现和近 7 天匿名事件趋势。"
+        description="查看门店服务状态、今日连接表现和近 7 天匿名事件趋势。"
         actions={
           <Button variant="outline" onClick={reload} disabled={resource.status === "loading"}>
             <RefreshCw data-icon="inline-start" />
@@ -168,10 +168,10 @@ function DashboardContent({
 }): React.JSX.Element {
   const metrics = [
     {
-      label: "用户总数",
+      label: "门店总数",
       value: formatNumber(data.dashboard.storeTotal),
-      icon: UserRound,
-      helper: "当前账号可管理的用户",
+      icon: Store,
+      helper: "平台统一维护",
     },
     {
       label: "启用二维码",
@@ -195,7 +195,7 @@ function DashboardContent({
       label: "今日成功率",
       value: formatPercent(data.dashboard.today.successRate),
       icon: Activity,
-      helper: "成功 /（成功 + 失败）",
+      helper: "连接成功 / 点击",
     },
   ] as const;
 
@@ -314,7 +314,7 @@ function DashboardContent({
       <Card>
         <CardHeader className="flex-col gap-4 sm:flex-row sm:items-center">
           <div className="flex flex-col gap-1.5">
-            <CardTitle>近期用户</CardTitle>
+            <CardTitle>近期门店</CardTitle>
             <CardDescription>按更新时间和服务状态筛选。</CardDescription>
           </div>
           <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
@@ -338,7 +338,7 @@ function DashboardContent({
               value={status}
               onValueChange={(value) => onStatusChange(value as StoreStatus | "all")}
             >
-              <SelectTrigger className="sm:w-36" aria-label="用户状态">
+              <SelectTrigger className="sm:w-36" aria-label="门店状态">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -356,7 +356,7 @@ function DashboardContent({
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>用户</TableHead>
+                  <TableHead>门店</TableHead>
                   <TableHead>状态</TableHead>
                   <TableHead>Wi-Fi</TableHead>
                   <TableHead>二维码</TableHead>
@@ -400,7 +400,7 @@ function DashboardContent({
             </Table>
           ) : (
             <ResourceEmpty
-              title="没有符合条件的用户"
+              title="没有符合条件的门店"
               description="调整日期范围或状态筛选后再试。"
             />
           )}

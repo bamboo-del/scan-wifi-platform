@@ -30,7 +30,7 @@ MINIPROGRAM_ENABLE_LEGACY_WIFI_API=false
 
    本机 API 联调可改用 `build:local`。两个命令都会生成包含诊断页的开发/体验页面清单。
 
-2. 用微信开发者工具导入 `apps/mini-program`，确认 AppID 为 `YOUR_WECHAT_APP_ID`。
+2. 用微信开发者工具导入 `apps/mini-program`，填写自己的小程序 AppID。
 3. 在开发者工具顶部菜单执行“工具”→“清除缓存”→“全部清除”。模块文件名变更后不得只使用热重载缓存。
 4. 选择项目已有的编译模式“Wi-Fi 诊断（仅开发版/体验版）”，点击“编译”，确认控制台没有 `module is not defined` 或 `wx://not-found`。
 5. 打开“代码质量”面板并点击“重新扫描”，确认运行中的 `dist/app.json` 已识别 `lazyCodeLoading: "requiredComponents"`。

@@ -9,9 +9,9 @@ import PanelLeftClose from "lucide-react/dist/esm/icons/panel-left-close";
 import PanelLeftOpen from "lucide-react/dist/esm/icons/panel-left-open";
 import QrCode from "lucide-react/dist/esm/icons/qr-code";
 import Settings from "lucide-react/dist/esm/icons/settings";
+import Store from "lucide-react/dist/esm/icons/store";
 import UserRound from "lucide-react/dist/esm/icons/user-round";
-import { NavLink, Outlet, useNavigate } from "react-router-dom";
-import { toast } from "sonner";
+import { NavLink, Outlet, useNavigate } from "react-router";
 
 import { useAuth } from "@/auth/auth-context";
 import { Brand } from "@/components/brand";
@@ -31,11 +31,11 @@ import { cn } from "@/lib/utils";
 
 const navigation = [
   { to: "/", label: "仪表盘", icon: LayoutDashboard, end: true },
-  { to: "/stores", label: "用户管理", icon: UserRound, end: false },
+  { to: "/merchants", label: "商户管理", icon: UserRound, end: false },
+  { to: "/analytics", label: "连接统计", icon: LayoutDashboard, end: false },
+  { to: "/stores", label: "门店管理", icon: Store, end: false },
   { to: "/qrcodes", label: "二维码", icon: QrCode, end: false },
   { to: "/operation-logs", label: "操作日志", icon: FileClock, end: false },
-  { to: "/accounts", label: "同仁账号", icon: UserRound, end: false },
-  { to: "/password", label: "修改密码", icon: UserRound, end: false },
   { to: "/settings", label: "系统设置", icon: Settings, end: false },
 ] as const;
 
@@ -46,30 +46,27 @@ function Navigation({
   collapsed?: boolean;
   onNavigate?: () => void;
 }): React.JSX.Element {
-  const { admin } = useAuth();
   return (
     <nav className="flex flex-col gap-1 px-3" aria-label="主导航">
-      {navigation
-        .filter((item) => admin?.role === "admin" || ["/stores", "/qrcodes"].includes(item.to))
-        .map(({ to, label, icon: Icon, end }) => (
-          <NavLink
-            key={to}
-            to={to}
-            end={end}
-            onClick={onNavigate}
-            title={collapsed ? label : undefined}
-            className={({ isActive }) =>
-              cn(
-                "flex h-11 items-center rounded-lg px-3 text-sm font-medium text-sidebar-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30",
-                collapsed ? "justify-center" : "gap-3",
-                isActive && "bg-accent text-primary",
-              )
-            }
-          >
-            <Icon className="size-5 shrink-0 stroke-[1.75]" aria-hidden="true" />
-            {collapsed ? <span className="sr-only">{label}</span> : <span>{label}</span>}
-          </NavLink>
-        ))}
+      {navigation.map(({ to, label, icon: Icon, end }) => (
+        <NavLink
+          key={to}
+          to={to}
+          end={end}
+          onClick={onNavigate}
+          title={collapsed ? label : undefined}
+          className={({ isActive }) =>
+            cn(
+              "flex h-11 items-center rounded-lg px-3 text-sm font-medium text-sidebar-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30",
+              collapsed ? "justify-center" : "gap-3",
+              isActive && "bg-accent text-primary",
+            )
+          }
+        >
+          <Icon className="size-5 shrink-0 stroke-[1.75]" aria-hidden="true" />
+          {collapsed ? <span className="sr-only">{label}</span> : <span>{label}</span>}
+        </NavLink>
+      ))}
     </nav>
   );
 }
@@ -77,21 +74,12 @@ function Navigation({
 export function AppShell(): React.JSX.Element {
   const [collapsed, setCollapsed] = React.useState(false);
   const [mobileOpen, setMobileOpen] = React.useState(false);
-  const [logoutPending, setLogoutPending] = React.useState(false);
   const { admin, logout } = useAuth();
   const navigate = useNavigate();
 
   const handleLogout = async (): Promise<void> => {
-    if (logoutPending) return;
-    setLogoutPending(true);
-    try {
-      await logout();
-      void navigate("/login", { replace: true });
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "退出登录失败，请重试");
-    } finally {
-      setLogoutPending(false);
-    }
+    await logout();
+    void navigate("/login", { replace: true });
   };
 
   return (
@@ -162,10 +150,7 @@ export function AppShell(): React.JSX.Element {
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
               <DropdownMenuGroup>
-                <DropdownMenuItem onSelect={() => void navigate("/password")}>
-                  修改密码
-                </DropdownMenuItem>
-                <DropdownMenuItem disabled={logoutPending} onSelect={() => void handleLogout()}>
+                <DropdownMenuItem onSelect={() => void handleLogout()}>
                   <LogOut />
                   退出登录
                 </DropdownMenuItem>

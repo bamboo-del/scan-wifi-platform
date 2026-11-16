@@ -1,0 +1,11 @@
+<view class="manage-page">
+  <view class="heading">{{id ? '编辑 WiFi 贴' : '创建 WiFi 贴'}}</view>
+  <view class="muted">密码仅用于连接门店网络，不会写入二维码。</view>
+  <label>店铺名称<input id="shop-name" value="{{shopName}}" maxlength="120" data-field="shopName" bindinput="onField" /></label>
+  <label>点位名称<input value="{{spotName}}" maxlength="80" placeholder="例如：大厅、二楼" data-field="spotName" bindinput="onField" /></label>
+  <label>WiFi 名称（SSID）<input id="wifi-ssid" value="{{ssid}}" maxlength="32" data-field="ssid" bindinput="onField" /></label>
+  <label>{{id ? '当前或新 WiFi 密码' : 'WiFi 密码'}}<input id="wifi-password" password value="{{passwordInput}}" maxlength="63" placeholder="8 至 63 位" bindinput="onPassword" /></label>
+  <label>BSSID（可选）<input value="{{bssid}}" maxlength="17" placeholder="AA:BB:CC:DD:EE:FF" data-field="bssid" bindinput="onField" /></label>
+  <view wx:if="{{error}}" class="error">{{error}}</view>
+  <button class="primary" loading="{{busy}}" disabled="{{busy}}" bindtap="onSave">{{id ? '保存修改' : '保存并生成小程序码'}}</button>
+</view>

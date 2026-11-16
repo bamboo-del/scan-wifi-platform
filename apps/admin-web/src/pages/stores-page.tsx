@@ -1,5 +1,4 @@
 import * as React from "react";
-import { useAuth } from "@/auth/auth-context";
 import Eye from "lucide-react/dist/esm/icons/eye";
 import MoreVertical from "lucide-react/dist/esm/icons/ellipsis-vertical";
 import Pencil from "lucide-react/dist/esm/icons/pencil";
@@ -7,7 +6,7 @@ import Plus from "lucide-react/dist/esm/icons/plus";
 import Power from "lucide-react/dist/esm/icons/power";
 import Search from "lucide-react/dist/esm/icons/search";
 import SlidersHorizontal from "lucide-react/dist/esm/icons/sliders-horizontal";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router";
 import { toast } from "sonner";
 
 import { ConfirmActionDialog } from "@/components/confirm-action-dialog";
@@ -49,8 +48,6 @@ import { formatDateTime } from "@/lib/format";
 import type { StoreStatus } from "@/lib/types";
 
 export default function StoresPage(): React.JSX.Element {
-  const { admin } = useAuth();
-  const isAdmin = admin?.role === "admin";
   const navigate = useNavigate();
   const [searchInput, setSearchInput] = React.useState("");
   const [search, setSearch] = React.useState("");
@@ -74,10 +71,10 @@ export default function StoresPage(): React.JSX.Element {
     setPendingStore(storeId);
     try {
       await api.setStoreStatus(storeId, status);
-      toast.success(status === "active" ? "用户已启用" : "用户已停用");
+      toast.success(status === "active" ? "门店已启用" : "门店已停用");
       reload();
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "用户状态更新失败");
+      toast.error(error instanceof Error ? error.message : "门店状态更新失败");
     } finally {
       setPendingStore(null);
     }
@@ -86,13 +83,13 @@ export default function StoresPage(): React.JSX.Element {
   return (
     <div className="flex flex-col gap-6">
       <PageHeader
-        title="用户管理"
-        description="管理当前账号可访问的用户资料、连接配置和服务状态。"
+        title="门店管理"
+        description="平台管理员统一维护门店资料、连接配置和服务状态。"
         actions={
           <Button asChild>
             <Link to="/stores/new">
               <Plus data-icon="inline-start" />
-              新建用户
+              新建门店
             </Link>
           </Button>
         }
@@ -101,20 +98,20 @@ export default function StoresPage(): React.JSX.Element {
       <Card>
         <CardHeader className="flex-col gap-4 lg:flex-row lg:items-center">
           <div className="flex flex-col gap-1.5">
-            <CardTitle>用户列表</CardTitle>
-            <CardDescription>搜索用户名称、简称或地址。</CardDescription>
+            <CardTitle>门店列表</CardTitle>
+            <CardDescription>搜索门店名称、简称或地址。</CardDescription>
           </div>
           <div className="flex w-full flex-col gap-3 sm:flex-row lg:w-auto">
             <form className="flex w-full gap-2 sm:min-w-80" onSubmit={submitSearch}>
               <Field className="min-w-0 flex-1">
                 <FieldLabel htmlFor="store-search" className="sr-only">
-                  搜索用户
+                  搜索门店
                 </FieldLabel>
                 <Input
                   id="store-search"
                   value={searchInput}
                   onChange={(event) => setSearchInput(event.target.value)}
-                  placeholder="用户名称、简称或地址"
+                  placeholder="门店名称、简称或地址"
                 />
               </Field>
               <Button type="submit" variant="outline">
@@ -129,7 +126,7 @@ export default function StoresPage(): React.JSX.Element {
                 setPage(1);
               }}
             >
-              <SelectTrigger className="sm:w-40" aria-label="筛选用户状态">
+              <SelectTrigger className="sm:w-40" aria-label="筛选门店状态">
                 <SlidersHorizontal className="size-4 text-muted-foreground" />
                 <SelectValue />
               </SelectTrigger>
@@ -152,13 +149,13 @@ export default function StoresPage(): React.JSX.Element {
           ) : null}
           {resource.status === "success" && resource.data.items.length === 0 ? (
             <ResourceEmpty
-              title="没有找到用户"
-              description="调整搜索或状态筛选，或者创建第一位用户。"
+              title="没有找到门店"
+              description="调整搜索或状态筛选，或者创建第一家门店。"
               action={
                 <Button asChild>
                   <Link to="/stores/new">
                     <Plus data-icon="inline-start" />
-                    新建用户
+                    新建门店
                   </Link>
                 </Button>
               }
@@ -169,8 +166,7 @@ export default function StoresPage(): React.JSX.Element {
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>用户</TableHead>
-                    {isAdmin ? <TableHead>创建账号</TableHead> : null}
+                    <TableHead>门店</TableHead>
                     <TableHead>状态</TableHead>
                     <TableHead>Wi-Fi</TableHead>
                     <TableHead>二维码</TableHead>
@@ -194,9 +190,6 @@ export default function StoresPage(): React.JSX.Element {
                           </span>
                         </button>
                       </TableCell>
-                      {isAdmin ? (
-                        <TableCell>{store.createdByUsername ?? "历史记录，未记录"}</TableCell>
-                      ) : null}
                       <TableCell>
                         <StatusBadge status={store.status} />
                       </TableCell>
@@ -208,38 +201,36 @@ export default function StoresPage(): React.JSX.Element {
                       <TableCell>{formatDateTime(store.updatedAt)}</TableCell>
                       <TableCell>
                         <div className="flex items-center justify-end gap-1">
-                          {isAdmin ? (
-                            <ConfirmActionDialog
-                              trigger={
-                                <Button
-                                  variant="ghost"
-                                  size="icon-sm"
-                                  aria-label={
-                                    store.status === "active"
-                                      ? `停用 ${store.name}`
-                                      : `启用 ${store.name}`
-                                  }
-                                  disabled={pendingStore === store.id}
-                                >
-                                  {pendingStore === store.id ? <Spinner /> : <Power />}
-                                </Button>
-                              }
-                              title={store.status === "active" ? "停用用户？" : "启用用户？"}
-                              description={
-                                store.status === "active"
-                                  ? "停用后，该用户将无法继续提供扫码连接服务。"
-                                  : "启用后，该用户将恢复提供扫码连接服务。"
-                              }
-                              confirmLabel={store.status === "active" ? "确认停用" : "确认启用"}
-                              destructive={store.status === "active"}
-                              onConfirm={() =>
-                                changeStatus(
-                                  store.id,
-                                  store.status === "active" ? "disabled" : "active",
-                                )
-                              }
-                            />
-                          ) : null}
+                          <ConfirmActionDialog
+                            trigger={
+                              <Button
+                                variant="ghost"
+                                size="icon-sm"
+                                aria-label={
+                                  store.status === "active"
+                                    ? `停用 ${store.name}`
+                                    : `启用 ${store.name}`
+                                }
+                                disabled={pendingStore === store.id}
+                              >
+                                {pendingStore === store.id ? <Spinner /> : <Power />}
+                              </Button>
+                            }
+                            title={store.status === "active" ? "停用门店？" : "启用门店？"}
+                            description={
+                              store.status === "active"
+                                ? "停用后，该门店将无法继续提供扫码连接服务。"
+                                : "启用后，该门店将恢复提供扫码连接服务。"
+                            }
+                            confirmLabel={store.status === "active" ? "确认停用" : "确认启用"}
+                            destructive={store.status === "active"}
+                            onConfirm={() =>
+                              changeStatus(
+                                store.id,
+                                store.status === "active" ? "disabled" : "active",
+                              )
+                            }
+                          />
                           <DropdownMenu>
                             <DropdownMenuTrigger asChild>
                               <Button
@@ -256,14 +247,12 @@ export default function StoresPage(): React.JSX.Element {
                                   <Eye />
                                   查看详情
                                 </DropdownMenuItem>
-                                {isAdmin ? (
-                                  <DropdownMenuItem
-                                    onSelect={() => navigate(`/stores/${store.id}/edit`)}
-                                  >
-                                    <Pencil />
-                                    编辑
-                                  </DropdownMenuItem>
-                                ) : null}
+                                <DropdownMenuItem
+                                  onSelect={() => navigate(`/stores/${store.id}/edit`)}
+                                >
+                                  <Pencil />
+                                  编辑
+                                </DropdownMenuItem>
                               </DropdownMenuGroup>
                             </DropdownMenuContent>
                           </DropdownMenu>

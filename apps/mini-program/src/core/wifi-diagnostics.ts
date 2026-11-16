@@ -5,6 +5,7 @@ import type {
   WifiConnectedListener,
   WifiDiagnosticsWxApi,
 } from "../platform/wechat-types";
+import { normalizeWifiError } from "./wifi-errors";
 
 export type WifiDiagnosticStatus =
   "idle" | "running" | "completed" | "failed" | "timeout" | "cancelled";
@@ -16,6 +17,7 @@ export interface WifiDiagnosticInput {
 }
 
 export interface WifiDiagnosticReport {
+  readonly userMessage: string;
   readonly status: WifiDiagnosticStatus;
   readonly sdkVersion: string;
   readonly system: string;
@@ -53,10 +55,13 @@ const REDACTED = "[REDACTED]";
 const REDACTED_KEY = /(?:password|passwd|passphrase|secret|token|authorization|cookie)/iu;
 
 function sanitizeString(value: string, password: string): string {
-  if (password.length === 0) {
-    return value;
-  }
-  return value.split(password).join(REDACTED);
+  const masked = password.length === 0 ? value : value.split(password).join(REDACTED);
+  return masked
+    .replace(
+      /\b(?:password|passwd|secret|token|authorization|cookie)\s*[:=]\s*[^,;\r\n]*/gi,
+      REDACTED,
+    )
+    .replace(/\b[a-f0-9]{32,}\b/gi, REDACTED);
 }
 
 function sanitizeValue(
@@ -186,6 +191,7 @@ export function createInitialWifiDiagnosticReport(api: DiagnosticApi): WifiDiagn
   const platform = readPlatformInfo(api);
   return {
     status: "idle",
+    userMessage: "准备连接",
     sdkVersion: platform.sdkVersion,
     system: platform.system,
     startWifiAvailable: typeof api.startWifi === "function",
@@ -275,9 +281,6 @@ export class WifiDiagnosticsSession {
         return;
       }
 
-      this.timeoutId = setTimeout(() => {
-        this.finish("timeout", null, `等待 wx.startWifi 回调超时（${this.timeoutMs}ms）`);
-      }, this.timeoutMs);
       let startHandled = false;
       try {
         this.api.startWifi({
@@ -396,7 +399,6 @@ export class WifiDiagnosticsSession {
 
   private callConnectWifi(input: WifiDiagnosticInput): void {
     if (this.finished || this.disposed || typeof this.api.connectWifi !== "function") return;
-    if (this.timeoutId !== null) clearTimeout(this.timeoutId);
     this.connectStartedAt = Date.now();
     this.report = { ...this.report, errCode: null, errMsg: "正在调用 wx.connectWifi" };
     this.emit();
@@ -519,6 +521,16 @@ export class WifiDiagnosticsSession {
   }
 
   private emit(): void {
-    this.update({ ...this.report, errMsg: sanitizeString(this.report.errMsg, this.password) });
+    this.report = {
+      ...this.report,
+      errMsg: sanitizeString(this.report.errMsg, this.password),
+      userMessage:
+        this.report.errCode === null
+          ? this.report.status === "completed"
+            ? "WiFi 已连接"
+            : "请查看下方诊断结果"
+          : normalizeWifiError({ errCode: this.report.errCode }).message,
+    };
+    this.update({ ...this.report });
   }
 }

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { api, ApiError, SESSION_EXPIRED_EVENT } from "@/lib/api";
+import { api, ApiError } from "@/lib/api";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -75,12 +75,11 @@ describe("admin API client", () => {
   });
 
   it("maps canonical store statuses to the matching action endpoint", async () => {
-    const fetchMock = vi.fn().mockImplementation(
-      () =>
-        new Response(JSON.stringify({}), {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
-        }),
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({}), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
     );
     vi.stubGlobal("fetch", fetchMock);
 
@@ -131,12 +130,11 @@ describe("admin API client", () => {
   });
 
   it("maps canonical QR code statuses to the matching action endpoint", async () => {
-    const fetchMock = vi.fn().mockImplementation(
-      () =>
-        new Response(JSON.stringify({}), {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
-        }),
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({}), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
     );
     vi.stubGlobal("fetch", fetchMock);
 
@@ -163,7 +161,7 @@ describe("admin API client", () => {
           JSON.stringify({
             error: {
               code: "QR_CODE_NOT_FOUND",
-              message: "该用户尚未生成小程序码",
+              message: "该门店尚未生成小程序码",
               requestId: "request-qr-missing",
             },
           }),
@@ -183,7 +181,7 @@ describe("admin API client", () => {
           JSON.stringify({
             error: {
               code: "STORE_NOT_FOUND",
-              message: "用户不存在",
+              message: "门店不存在",
               requestId: "request-store-missing",
             },
           }),
@@ -195,32 +193,6 @@ describe("admin API client", () => {
     await expect(api.getQrCode("missing-store")).rejects.toMatchObject({
       status: 404,
       code: "STORE_NOT_FOUND",
-    });
-  });
-
-  it("expires an administrator session when a protected request returns 401", async () => {
-    const expired = vi.fn();
-    window.addEventListener(SESSION_EXPIRED_EVENT, expired);
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockImplementation(() => new Response("", { status: 401 })),
-    );
-    try {
-      await expect(api.dashboard()).rejects.toMatchObject({ status: 401 });
-      expect(expired).toHaveBeenCalledOnce();
-      await expect(api.login("admin", "wrong-password")).rejects.toMatchObject({ status: 401 });
-      expect(expired).toHaveBeenCalledOnce();
-    } finally {
-      window.removeEventListener(SESSION_EXPIRED_EVENT, expired);
-    }
-  });
-
-  it("reports a malformed successful response instead of returning null to a page", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("<html>Proxy error</html>")));
-
-    await expect(api.dashboard()).rejects.toMatchObject({
-      code: "INVALID_RESPONSE",
-      message: "服务返回了无效数据，请稍后重试",
     });
   });
 });

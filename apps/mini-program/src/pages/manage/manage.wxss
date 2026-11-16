@@ -1,0 +1,65 @@
+.manage-page {
+  padding: 36rpx;
+  color: #16211f;
+}
+.heading {
+  font-size: 42rpx;
+  font-weight: 600;
+  margin-bottom: 20rpx;
+}
+.title {
+  font-size: 34rpx;
+  font-weight: 600;
+}
+.muted {
+  color: #65726e;
+  font-size: 26rpx;
+  margin: 14rpx 0;
+  overflow-wrap: anywhere;
+}
+.card {
+  padding: 28rpx;
+  border: 1rpx solid #dce5e0;
+  border-radius: 20rpx;
+  margin: 24rpx 0;
+}
+input {
+  border: 1rpx solid #cfdcd5;
+  border-radius: 12rpx;
+  padding: 22rpx;
+  margin: 16rpx 0 26rpx;
+  font-size: 30rpx;
+}
+label {
+  display: block;
+  margin-top: 28rpx;
+}
+button {
+  width: 100%;
+  box-sizing: border-box;
+  margin: 22rpx 0;
+  font-size: 30rpx;
+}
+.primary {
+  background: #14795a;
+  color: white;
+}
+.secondary {
+  background: #f0f5f2;
+}
+.error,
+.danger {
+  color: #aa3226;
+}
+.error {
+  margin: 24rpx 0;
+  line-height: 1.6;
+}
+.qr {
+  width: 100%;
+  height: 560rpx;
+  background: white;
+}
+.poster {
+  width: 100%;
+}

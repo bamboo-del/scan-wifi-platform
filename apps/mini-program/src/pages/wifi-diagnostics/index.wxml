@@ -30,6 +30,7 @@
 
   <view class="section">
     <view class="section-title">诊断结果</view>
+    <view class="kv-row"><text>用户提示</text><text class="kv-value">{{userMessage}}</text></view>
     <view class="kv-row"><text>状态</text><text>{{status}}</text></view>
     <view class="kv-row"><text>选用监听</text><text class="kv-value">{{selectedListener}}</text></view>
     <view class="kv-row"><text>选用清理</text><text class="kv-value">{{selectedCleanup}}</text></view>

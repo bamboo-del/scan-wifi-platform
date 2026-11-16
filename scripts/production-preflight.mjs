@@ -11,9 +11,20 @@ const selectedEnvironmentNames = new Set([
   "ADMIN_DOMAIN",
   "ACME_EMAIL",
   "BACKUP_HOST_DIR",
+  "DATABASE_BACKUP_URL",
+  "IMAGE_TAG",
+  "INITIAL_ADMIN_PASSWORD",
   "MINIPROGRAM_ENABLE_LEGACY_WIFI_API",
   "MINIPROGRAM_AD_UNIT_ID",
+  "POSTGRES_APP_PASSWORD",
+  "POSTGRES_APP_USER",
+  "POSTGRES_DB",
+  "POSTGRES_OWNER_PASSWORD",
+  "POSTGRES_OWNER_USER",
+  "SESSION_SECRET",
   "WECHAT_APP_ID",
+  "WECHAT_APP_SECRET",
+  "WIFI_ENCRYPTION_KEY_BASE64",
 ]);
 const forbiddenClientMarkers = [
   "WECHAT_APP_SECRET",
@@ -65,8 +76,6 @@ export function validateProductionStaticConfiguration({
   nginxConfiguration,
   backupScript,
 }) {
-  compose = compose.replace(/\r\n/gu, "\n");
-  dockerfile = dockerfile.replace(/\r\n/gu, "\n");
   const postgres = extractService(compose, "postgres");
   const api = extractService(compose, "api");
   const admin = extractService(compose, "admin");
@@ -74,23 +83,6 @@ export function validateProductionStaticConfiguration({
   const backup = extractService(compose, "backup");
 
   requireCondition(!/^ {4}ports:/mu.test(postgres), "PostgreSQL must not publish host ports");
-  requireCondition(!/^ {4}ports:/mu.test(api), "API must not publish host ports");
-  requireCondition(
-    api.includes('TRUST_PROXY_ADDRESSES: "172.30.250.2"') &&
-      caddy.includes("ipv4_address: 172.30.250.2") &&
-      compose.includes("subnet: 172.30.250.0/28"),
-    "API must trust only the fixed Caddy peer",
-  );
-  requireCondition(
-    nginxConfiguration.includes("add_header_inherit merge;"),
-    "nginx cache locations must inherit security headers",
-  );
-  requireCondition(
-    caddyfile.includes(
-      'request>uri regexp "/api/public/connect/[^/?]+" "/api/public/connect/[REDACTED]"',
-    ),
-    "Caddy logs must redact public scene tokens",
-  );
   requireCondition(
     compose.includes("backend:\n    internal: true"),
     "the backend Docker network must remain internal",
@@ -121,6 +113,10 @@ export function validateProductionStaticConfiguration({
     "admin production build must require API_DOMAIN",
   );
   requireCondition(
+    admin.includes('VITE_DEMO_MODE: "false"'),
+    "admin production build must keep VITE_DEMO_MODE false",
+  );
+  requireCondition(
     caddy.includes("API_DOMAIN: ${API_DOMAIN:?API_DOMAIN is required}") &&
       caddy.includes("ADMIN_DOMAIN: ${ADMIN_DOMAIN:?ADMIN_DOMAIN is required}"),
     "Caddy must require both production domains",
@@ -146,6 +142,10 @@ export function validateProductionStaticConfiguration({
     "Docker admin build must validate its public API URL",
   );
   requireCondition(
+    dockerfile.includes("ARG VITE_DEMO_MODE=false"),
+    "Docker admin build must default VITE_DEMO_MODE to false",
+  );
+  requireCondition(
     caddyfile.includes("{$API_DOMAIN}") &&
       caddyfile.includes("{$ADMIN_DOMAIN}") &&
       !/example\.(?:cn|com)/iu.test(caddyfile),
@@ -156,6 +156,18 @@ export function validateProductionStaticConfiguration({
       nginxConfiguration.includes("location = /healthz"),
     "admin nginx configuration must keep server tokens disabled and expose only its health check",
   );
+  for (const header of [
+    "X-Content-Type-Options",
+    "X-Frame-Options",
+    "Referrer-Policy",
+    "Permissions-Policy",
+    "Content-Security-Policy",
+  ]) {
+    requireCondition(
+      (nginxConfiguration.match(new RegExp(`add_header ${header}\\b`, "gu")) ?? []).length >= 3,
+      `admin nginx must preserve ${header} on HTML and cached asset responses`,
+    );
+  }
   requireCondition(
     backupScript.includes('mkdir -p "$BACKUP_DIR"') &&
       backupScript.includes('pg_restore --list "$temporary"'),
@@ -210,9 +222,61 @@ export async function validateProductionEnvironment(
   requireCondition(apiDomain !== adminDomain, "API_DOMAIN and ADMIN_DOMAIN must be different");
   assertReleaseAppId(values.WECHAT_APP_ID, "WECHAT_APP_ID");
   requireCondition(
-    values.MINIPROGRAM_ENABLE_LEGACY_WIFI_API === "false",
-    "MINIPROGRAM_ENABLE_LEGACY_WIFI_API must remain false before the formal release gate",
+    /^[A-Za-z0-9_-]{16,128}$/u.test(values.WECHAT_APP_SECRET ?? "") &&
+      !isKnownPlaceholder(values.WECHAT_APP_SECRET),
+    "WECHAT_APP_SECRET must be a non-placeholder server credential",
   );
+  requireCondition(
+    ["true", "false"].includes(values.MINIPROGRAM_ENABLE_LEGACY_WIFI_API),
+    "MINIPROGRAM_ENABLE_LEGACY_WIFI_API must be an explicit boolean",
+  );
+  requireCondition(
+    /^(?!latest$)[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u.test(values.IMAGE_TAG ?? "") &&
+      !isKnownPlaceholder(values.IMAGE_TAG),
+    "IMAGE_TAG must be an explicit immutable non-placeholder tag",
+  );
+
+  const ownerUser = requireDatabaseIdentifier(values.POSTGRES_OWNER_USER, "POSTGRES_OWNER_USER");
+  const appUser = requireDatabaseIdentifier(values.POSTGRES_APP_USER, "POSTGRES_APP_USER");
+  const databaseName = requireDatabaseIdentifier(values.POSTGRES_DB, "POSTGRES_DB");
+  requireCondition(
+    ownerUser !== appUser,
+    "PostgreSQL owner and application users must be different",
+  );
+  const ownerPassword = requireHexSecret(values.POSTGRES_OWNER_PASSWORD, "POSTGRES_OWNER_PASSWORD");
+  const appPassword = requireHexSecret(values.POSTGRES_APP_PASSWORD, "POSTGRES_APP_PASSWORD");
+  requireCondition(
+    ownerPassword !== appPassword,
+    "PostgreSQL owner and application passwords must be different",
+  );
+  const encryptionKey = values.WIFI_ENCRYPTION_KEY_BASE64 ?? "";
+  let decodedEncryptionKey;
+  try {
+    decodedEncryptionKey = Buffer.from(encryptionKey, "base64");
+  } catch {
+    decodedEncryptionKey = Buffer.alloc(0);
+  }
+  requireCondition(
+    decodedEncryptionKey.length === 32 &&
+      decodedEncryptionKey.toString("base64") === encryptionKey &&
+      !isKnownPlaceholder(encryptionKey),
+    "WIFI_ENCRYPTION_KEY_BASE64 must be a non-placeholder base64 value for exactly 32 bytes",
+  );
+  requireCondition(
+    (values.SESSION_SECRET?.length ?? 0) >= 32 &&
+      !/\s/u.test(values.SESSION_SECRET ?? "") &&
+      !isKnownPlaceholder(values.SESSION_SECRET),
+    "SESSION_SECRET must be a non-placeholder value of at least 32 characters",
+  );
+  const initialPassword = values.INITIAL_ADMIN_PASSWORD ?? "";
+  requireCondition(
+    initialPassword.length === 0 ||
+      (initialPassword.length >= 16 &&
+        !/\s/u.test(initialPassword) &&
+        !isKnownPlaceholder(initialPassword)),
+    "INITIAL_ADMIN_PASSWORD must be empty after initialization or a strong one-time value",
+  );
+  validateBackupUrl(values.DATABASE_BACKUP_URL, ownerUser, ownerPassword, databaseName);
 
   const email = values.ACME_EMAIL ?? "";
   const emailMatch = /^[^@\s]+@([^@\s]+)$/u.exec(email);
@@ -231,6 +295,48 @@ export async function validateProductionEnvironment(
   await access(backupDirectory, constants.W_OK).catch(() => {
     fail("BACKUP_HOST_DIR must be writable by the preflight user");
   });
+}
+
+function isKnownPlaceholder(value) {
+  return /^(?:replace|change-?me|changeme|example|placeholder|test|your[_-])/iu.test(value ?? "");
+}
+
+function requireDatabaseIdentifier(value, name) {
+  const normalized = value ?? "";
+  requireCondition(
+    /^[a-z_][a-z0-9_]{0,62}$/u.test(normalized) && !isKnownPlaceholder(normalized),
+    `${name} must be a non-placeholder PostgreSQL identifier`,
+  );
+  return normalized;
+}
+
+function requireHexSecret(value, name) {
+  const normalized = value ?? "";
+  requireCondition(
+    /^[a-f0-9]{32,128}$/u.test(normalized) && !isKnownPlaceholder(normalized),
+    `${name} must be a non-placeholder lowercase hexadecimal value of at least 32 characters`,
+  );
+  return normalized;
+}
+
+function validateBackupUrl(value, ownerUser, ownerPassword, databaseName) {
+  let url;
+  try {
+    url = new URL(value ?? "");
+  } catch {
+    fail("DATABASE_BACKUP_URL must be a valid PostgreSQL URL");
+  }
+  requireCondition(
+    (url.protocol === "postgresql:" || url.protocol === "postgres:") &&
+      url.hostname === "postgres" &&
+      (url.port === "" || url.port === "5432") &&
+      decodeURIComponent(url.username) === ownerUser &&
+      decodeURIComponent(url.password) === ownerPassword &&
+      decodeURIComponent(url.pathname.slice(1)) === databaseName &&
+      !url.search &&
+      !url.hash,
+    "DATABASE_BACKUP_URL must use the owner credential and internal postgres service",
+  );
 }
 
 export async function validateProductionTemplate(

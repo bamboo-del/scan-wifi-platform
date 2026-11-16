@@ -1,6 +1,9 @@
 import { GENERATED_MINI_PROGRAM_RUNTIME_CONFIG } from "./runtime.generated";
 
 export interface MiniProgramRuntimeConfig {
+  readonly enableAds: boolean;
+  readonly enableAnalytics: boolean;
+  readonly enableWifiDiagnostics: boolean;
   readonly apiBaseUrl: string;
   readonly requestTimeoutMs: number;
   readonly connectTimeoutMs: number;

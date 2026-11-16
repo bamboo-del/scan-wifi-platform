@@ -1,11 +1,10 @@
 import type { AppConfig } from "@scan-wifi/config";
 import {
-  accountStatusSchema,
-  changePasswordSchema,
-  createOperatorSchema,
-  resetPasswordSchema,
-  transferStoreSchema,
   createStoreSchema,
+  merchantSchema,
+  updateMerchantSchema,
+  wifiStatusUpdateSchema,
+  analyticsQuerySchema,
   loginSchema,
   operationLogQuerySchema,
   putWifiSchema,
@@ -18,8 +17,7 @@ import {
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { z } from "zod";
 import { forbidden } from "../lib/errors.js";
-import { requirePlatformAdmin } from "../services/access-service.js";
-import type { AccountService } from "../services/account-service.js";
+import type { MerchantService } from "../services/merchant-service.js";
 import type { AuthService } from "../services/auth-service.js";
 import type { QrCodeService } from "../services/qrcode-service.js";
 import type { SettingsService } from "../services/settings-service.js";
@@ -29,10 +27,11 @@ import { errorResponseSchema, requireAdmin, uuidParamsSchema } from "./route-uti
 
 const SESSION_COOKIE = "scan_wifi_admin_session";
 const idParams = z.object({ id: uuidSchema }).strict();
+const emptyBody = z.object({}).strict();
 
 export interface AdminRouteServices {
   auth: AuthService;
-  accounts: AccountService;
+  merchants: MerchantService;
   stores: StoreService;
   qrCodes: QrCodeService;
   statistics: StatisticsService;
@@ -54,16 +53,11 @@ export function registerAdminRoutes(
   services: AdminRouteServices,
   config: AppConfig,
 ): Promise<void> {
-  app.addHook("onSend", async (_request, reply, payload) => {
-    reply.header("Cache-Control", "no-store, private, max-age=0");
-    return payload;
-  });
   const authenticate = async (request: FastifyRequest): Promise<void> => {
     const session = await services.auth.authenticate(request.cookies[SESSION_COOKIE]);
     request.admin = {
       id: session.adminId,
       username: session.adminUsername,
-      role: session.adminRole,
       expiresAt: session.expiresAt,
     };
   };
@@ -79,7 +73,6 @@ export function registerAdminRoutes(
   app.post(
     "/auth/login",
     {
-      preHandler: verifyOrigin,
       config: { rateLimit: { max: 10, timeWindow: "1 minute" } },
       schema: {
         tags: ["管理员认证"],
@@ -118,7 +111,7 @@ export function registerAdminRoutes(
       reply.header("Cache-Control", "no-store");
       return {
         authenticated: true as const,
-        admin: { id: admin.id, username: admin.username, role: admin.role },
+        admin: { id: admin.id, username: admin.username },
         expiresAt: admin.expiresAt.toISOString(),
       };
     },
@@ -131,87 +124,103 @@ export function registerAdminRoutes(
       schema: { tags: ["管理员认证"], summary: "管理员退出" },
     },
     async (request, reply) => {
+      emptyBody.parse(request.body ?? {});
       await services.auth.logout(request.cookies[SESSION_COOKIE], requireAdmin(request).id);
       reply.clearCookie(SESSION_COOKIE, cookieOptions(config));
       return reply.code(204).send();
     },
   );
 
-  app.post(
-    "/auth/password",
-    { preHandler: [authenticate, verifyOrigin] },
-    async (request, reply) => {
-      await services.accounts.changePassword(
-        changePasswordSchema.parse(request.body),
-        requireAdmin(request),
-      );
-      reply.clearCookie(SESSION_COOKIE, cookieOptions(config));
-      return reply.code(204).send();
-    },
-  );
-  app.get("/accounts", { preHandler: authenticate }, async (request) =>
-    services.accounts.list(requireAdmin(request)),
-  );
-  app.post("/accounts", { preHandler: [authenticate, verifyOrigin] }, async (request, reply) =>
+  app.get("/merchants", { preHandler: authenticate }, async () => services.merchants.list());
+  app.post("/merchants", { preHandler: [authenticate, verifyOrigin] }, async (request, reply) =>
     reply
       .code(201)
       .send(
-        await services.accounts.create(
-          createOperatorSchema.parse(request.body),
-          requireAdmin(request),
-        ),
+        await services.merchants.save(merchantSchema.parse(request.body), requireAdmin(request).id),
       ),
+  );
+  app.patch("/merchants/:id", { preHandler: [authenticate, verifyOrigin] }, async (request) =>
+    services.merchants.save(
+      updateMerchantSchema.parse(request.body),
+      requireAdmin(request).id,
+      idParams.parse(request.params).id,
+    ),
+  );
+  const networkParams = z.object({ id: uuidSchema, wifiId: uuidSchema }).strict();
+  app.get("/stores/:id/networks", { preHandler: authenticate }, async (request) =>
+    services.stores.listWifi(idParams.parse(request.params).id),
+  );
+  app.post(
+    "/stores/:id/networks",
+    { preHandler: [authenticate, verifyOrigin] },
+    async (request, reply) =>
+      reply
+        .code(201)
+        .send(
+          await services.stores.putWifi(
+            idParams.parse(request.params).id,
+            putWifiSchema.parse(request.body),
+            requireAdmin(request).id,
+            undefined,
+            true,
+          ),
+        ),
+  );
+  app.put(
+    "/stores/:id/networks/:wifiId",
+    { preHandler: [authenticate, verifyOrigin] },
+    async (request) => {
+      const { id, wifiId } = networkParams.parse(request.params);
+      return services.stores.putWifi(
+        id,
+        putWifiSchema.parse(request.body),
+        requireAdmin(request).id,
+        wifiId,
+      );
+    },
   );
   app.patch(
-    "/accounts/:id/status",
-    { preHandler: [authenticate, verifyOrigin], schema: { params: uuidParamsSchema } },
-    async (request) =>
-      services.accounts.update(
-        idParams.parse(request.params).id,
-        accountStatusSchema.parse(request.body),
-        requireAdmin(request),
-      ),
-  );
-  app.post(
-    "/accounts/:id/password",
-    { preHandler: [authenticate, verifyOrigin], schema: { params: uuidParamsSchema } },
-    async (request) =>
-      services.accounts.update(
-        idParams.parse(request.params).id,
-        resetPasswordSchema.parse(request.body),
-        requireAdmin(request),
-      ),
-  );
-  app.post(
-    "/stores/:id/transfer",
-    { preHandler: [authenticate, verifyOrigin], schema: { params: uuidParamsSchema } },
-    async (request, reply) => {
-      await services.accounts.transfer(
-        idParams.parse(request.params).id,
-        transferStoreSchema.parse(request.body),
-        requireAdmin(request),
+    "/stores/:id/networks/:wifiId/status",
+    { preHandler: [authenticate, verifyOrigin] },
+    async (request) => {
+      const { id, wifiId } = networkParams.parse(request.params);
+      return services.stores.setWifiStatus(
+        id,
+        wifiId,
+        wifiStatusUpdateSchema.parse(request.body).status,
+        requireAdmin(request).id,
       );
-      return reply.code(204).send();
     },
+  );
+  app.post(
+    "/stores/:id/networks/:wifiId/qrcode",
+    { preHandler: [authenticate, verifyOrigin] },
+    async (request, reply) => {
+      const { id, wifiId } = networkParams.parse(request.params);
+      emptyBody.parse(request.body ?? {});
+      return reply
+        .code(201)
+        .send(await services.qrCodes.generate(id, requireAdmin(request).id, wifiId));
+    },
+  );
+  app.get("/analytics", { preHandler: authenticate }, async (request) =>
+    services.statistics.analytics(analyticsQuerySchema.parse(request.query)),
   );
 
   app.get(
     "/stores",
     {
       preHandler: authenticate,
-      schema: { tags: ["用户"], summary: "用户列表", response: { 401: errorResponseSchema } },
+      schema: { tags: ["门店"], summary: "门店列表", response: { 401: errorResponseSchema } },
     },
     async (request) => {
       const query = storeListQuerySchema.parse(request.query);
-      return services.stores.list(
-        {
-          page: query.page,
-          pageSize: query.pageSize,
-          ...(query.search === undefined ? {} : { search: query.search }),
-          ...(query.status === undefined ? {} : { status: query.status }),
-        },
-        requireAdmin(request),
-      );
+      return services.stores.list({
+        page: query.page,
+        pageSize: query.pageSize,
+        ...(query.search === undefined ? {} : { search: query.search }),
+        ...(query.status === undefined ? {} : { status: query.status }),
+      });
     },
   );
 
@@ -220,8 +229,8 @@ export function registerAdminRoutes(
     {
       preHandler: [authenticate, verifyOrigin],
       schema: {
-        tags: ["用户"],
-        summary: "创建用户",
+        tags: ["门店"],
+        summary: "创建门店",
         response: {
           201: { type: "object", additionalProperties: true },
           400: errorResponseSchema,
@@ -235,7 +244,7 @@ export function registerAdminRoutes(
         .send(
           await services.stores.create(
             createStoreSchema.parse(request.body),
-            requireAdmin(request),
+            requireAdmin(request).id,
           ),
         ),
   );
@@ -244,11 +253,11 @@ export function registerAdminRoutes(
     "/stores/:id",
     {
       preHandler: authenticate,
-      schema: { tags: ["用户"], summary: "用户详情", params: uuidParamsSchema },
+      schema: { tags: ["门店"], summary: "门店详情", params: uuidParamsSchema },
     },
     async (request) => {
       const { id } = idParams.parse(request.params);
-      return services.stores.get(id, requireAdmin(request));
+      return services.stores.get(id);
     },
   );
 
@@ -256,14 +265,14 @@ export function registerAdminRoutes(
     "/stores/:id",
     {
       preHandler: [authenticate, verifyOrigin],
-      schema: { tags: ["用户"], summary: "更新用户", params: uuidParamsSchema },
+      schema: { tags: ["门店"], summary: "更新门店", params: uuidParamsSchema },
     },
     async (request) => {
       const { id } = idParams.parse(request.params);
       return services.stores.update(
         id,
         updateStoreSchema.parse(request.body),
-        requireAdmin(request),
+        requireAdmin(request).id,
       );
     },
   );
@@ -275,14 +284,15 @@ export function registerAdminRoutes(
       {
         preHandler: [authenticate, verifyOrigin],
         schema: {
-          tags: ["用户"],
-          summary: `${status === "active" ? "启用" : "停用"}用户`,
+          tags: ["门店"],
+          summary: `${status === "active" ? "启用" : "停用"}门店`,
           params: uuidParamsSchema,
         },
       },
       async (request) => {
+        emptyBody.parse(request.body ?? {});
         const { id } = idParams.parse(request.params);
-        return services.stores.setStatus(id, status, requireAdmin(request));
+        return services.stores.setStatus(id, status, requireAdmin(request).id);
       },
     );
   }
@@ -295,7 +305,11 @@ export function registerAdminRoutes(
     },
     async (request) => {
       const { id } = idParams.parse(request.params);
-      return services.stores.putWifi(id, putWifiSchema.parse(request.body), requireAdmin(request));
+      return services.stores.putWifi(
+        id,
+        putWifiSchema.parse(request.body),
+        requireAdmin(request).id,
+      );
     },
   );
 
@@ -305,32 +319,35 @@ export function registerAdminRoutes(
       preHandler: authenticate,
       schema: { tags: ["Wi-Fi"], summary: "Wi-Fi 配置状态", params: uuidParamsSchema },
     },
-    async (request) =>
-      services.stores.getWifiStatus(idParams.parse(request.params).id, requireAdmin(request)),
+    async (request) => services.stores.getWifiStatus(idParams.parse(request.params).id),
   );
 
   app.post(
     "/stores/:id/qrcode",
     {
       preHandler: [authenticate, verifyOrigin],
-      schema: { tags: ["小程序码"], summary: "生成用户小程序码", params: uuidParamsSchema },
+      schema: { tags: ["小程序码"], summary: "生成门店小程序码", params: uuidParamsSchema },
     },
-    async (request, reply) =>
-      reply
+    async (request, reply) => {
+      emptyBody.parse(request.body ?? {});
+      return reply
         .code(201)
         .send(
-          await services.qrCodes.generate(idParams.parse(request.params).id, requireAdmin(request)),
-        ),
+          await services.qrCodes.generate(
+            idParams.parse(request.params).id,
+            requireAdmin(request).id,
+          ),
+        );
+    },
   );
 
   app.get(
     "/stores/:id/qrcode",
     {
       preHandler: authenticate,
-      schema: { tags: ["小程序码"], summary: "用户小程序码", params: uuidParamsSchema },
+      schema: { tags: ["小程序码"], summary: "门店小程序码", params: uuidParamsSchema },
     },
-    async (request) =>
-      services.qrCodes.getForStore(idParams.parse(request.params).id, requireAdmin(request)),
+    async (request) => services.qrCodes.getForStore(idParams.parse(request.params).id),
   );
 
   for (const status of ["active", "disabled"] as const) {
@@ -345,12 +362,14 @@ export function registerAdminRoutes(
           params: uuidParamsSchema,
         },
       },
-      async (request) =>
-        services.qrCodes.setStatus(
+      async (request) => {
+        emptyBody.parse(request.body ?? {});
+        return services.qrCodes.setStatus(
           idParams.parse(request.params).id,
           status,
-          requireAdmin(request),
-        ),
+          requireAdmin(request).id,
+        );
+      },
     );
   }
 
@@ -361,14 +380,11 @@ export function registerAdminRoutes(
       schema: { tags: ["小程序码"], summary: "预览或下载小程序码", params: uuidParamsSchema },
     },
     async (request, reply) => {
-      const image = await services.qrCodes.readImage(
-        idParams.parse(request.params).id,
-        requireAdmin(request),
-      );
+      const image = await services.qrCodes.readImage(idParams.parse(request.params).id);
       reply.header("Content-Type", image.contentType);
       reply.header(
         "Content-Disposition",
-        `inline; filename="store-qrcode-${image.qrCode.id}.${image.contentType === "image/png" ? "png" : image.contentType === "image/jpeg" ? "jpg" : "svg"}"`,
+        `inline; filename="store-qrcode-${image.qrCode.id}.${image.contentType === "image/png" ? "png" : "svg"}"`,
       );
       reply.header("Cache-Control", "private, no-cache");
       return reply.send(image.content);
@@ -378,19 +394,19 @@ export function registerAdminRoutes(
   app.get(
     "/dashboard",
     { preHandler: authenticate, schema: { tags: ["统计"], summary: "仪表盘统计" } },
-    async (request) => services.statistics.dashboard(requireAdmin(request)),
+    async () => services.statistics.dashboard(),
   );
 
   app.get(
     "/stores/:id/statistics",
     {
       preHandler: authenticate,
-      schema: { tags: ["统计"], summary: "用户统计", params: uuidParamsSchema },
+      schema: { tags: ["统计"], summary: "门店统计", params: uuidParamsSchema },
     },
     async (request) => {
       const { id } = idParams.parse(request.params);
       const query = statisticsQuerySchema.parse(request.query);
-      return services.statistics.storeStatistics(id, requireAdmin(request), query.from, query.to);
+      return services.statistics.storeStatistics(id, query.from, query.to);
     },
   );
 
@@ -399,26 +415,20 @@ export function registerAdminRoutes(
     { preHandler: authenticate, schema: { tags: ["审计"], summary: "管理员操作日志" } },
     async (request) => {
       const query = operationLogQuerySchema.parse(request.query);
-      return services.statistics.operationLogs(
-        {
-          page: query.page,
-          pageSize: query.pageSize,
-          ...(query.search === undefined ? {} : { search: query.search }),
-          ...(query.action === undefined ? {} : { action: query.action }),
-          ...(query.resourceType === undefined ? {} : { resourceType: query.resourceType }),
-        },
-        requireAdmin(request),
-      );
+      return services.statistics.operationLogs({
+        page: query.page,
+        pageSize: query.pageSize,
+        ...(query.search === undefined ? {} : { search: query.search }),
+        ...(query.action === undefined ? {} : { action: query.action }),
+        ...(query.resourceType === undefined ? {} : { resourceType: query.resourceType }),
+      });
     },
   );
 
   app.get(
     "/settings",
     { preHandler: authenticate, schema: { tags: ["设置"], summary: "系统设置状态" } },
-    async (request) => {
-      requirePlatformAdmin(requireAdmin(request));
-      return services.settings.get();
-    },
+    async () => services.settings.get(),
   );
   app.patch(
     "/settings",
@@ -426,13 +436,11 @@ export function registerAdminRoutes(
       preHandler: [authenticate, verifyOrigin],
       schema: { tags: ["设置"], summary: "更新系统设置" },
     },
-    async (request) => {
-      requirePlatformAdmin(requireAdmin(request));
-      return services.settings.update(
+    async (request) =>
+      services.settings.update(
         updateSettingsSchema.parse(request.body).globalAdEnabled,
         requireAdmin(request).id,
-      );
-    },
+      ),
   );
   return Promise.resolve();
 }

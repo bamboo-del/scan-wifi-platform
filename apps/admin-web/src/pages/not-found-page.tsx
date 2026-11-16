@@ -1,6 +1,6 @@
 import ArrowLeft from "lucide-react/dist/esm/icons/arrow-left";
 import Map from "lucide-react/dist/esm/icons/map";
-import { Link } from "react-router-dom";
+import { Link } from "react-router";
 
 import { Button } from "@/components/ui/button";
 import {

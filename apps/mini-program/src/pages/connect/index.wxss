@@ -1,383 +1,329 @@
 .page-shell {
+  box-sizing: border-box;
   min-height: 100vh;
-  box-sizing: border-box;
-  display: flex;
-  flex-direction: column;
-  padding: 24rpx 48rpx calc(36rpx + env(safe-area-inset-bottom));
-  background: #ffffff;
+  padding: 48rpx 40rpx 80rpx;
+  background: linear-gradient(160deg, #f0f5ff 0%, #f8fafc 48%, #fff 100%);
 }
-
-.ad-shell {
-  width: 100%;
-  max-height: 260rpx;
-  margin-bottom: 38rpx;
-  overflow: hidden;
-  opacity: 1;
-  transition:
-    max-height 180ms ease,
-    margin 180ms ease,
-    opacity 150ms ease;
-}
-
-.ad-shell--collapsed {
-  max-height: 0;
-  margin-bottom: 0;
-  opacity: 0;
-  pointer-events: none;
-}
-
-.ad-shell ad {
-  display: block;
-  width: 100%;
-}
-
-.connect-content {
-  width: 100%;
-  max-width: 654rpx;
+.connection-panel {
+  max-width: 640rpx;
   margin: 0 auto;
-  flex: 1;
 }
-
-.identity-block {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  padding-top: 32rpx;
+.signal-stage {
+  position: relative;
+  height: 280rpx;
+  perspective: 600rpx;
+  animation: enter 560ms ease-out both;
 }
-
-.mark-wrap {
-  width: 132rpx;
-  height: 132rpx;
-  padding: 6rpx;
+.signal-orbit {
+  position: absolute;
+  top: 12rpx;
+  left: 50%;
+  width: 256rpx;
+  height: 256rpx;
+  margin-left: -128rpx;
+  transform: rotateX(58deg) rotateZ(-20deg);
+}
+.orbit-track {
   box-sizing: border-box;
-  border-radius: 50%;
-  background: #ffffff;
-  box-shadow: 0 14rpx 48rpx rgba(10, 165, 143, 0.14);
-  overflow: hidden;
-}
-
-.wifi-mark,
-.store-logo {
-  display: block;
   width: 100%;
   height: 100%;
+  border: 2rpx solid #d5e2fa;
   border-radius: 50%;
 }
-
-.welcome-title {
-  margin-top: 34rpx;
-  color: #101918;
-  font-size: 40rpx;
-  font-weight: 700;
-  line-height: 1.35;
-  text-align: center;
-  letter-spacing: -0.4rpx;
+.orbit-dot {
+  position: absolute;
+  top: -5rpx;
+  left: 50%;
+  width: 10rpx;
+  height: 10rpx;
+  border-radius: 50%;
+  background: #8badef;
 }
-
-.availability-line {
-  display: flex;
-  align-items: center;
-  margin-top: 22rpx;
-  color: #33403e;
-  font-size: 27rpx;
-  line-height: 1;
+.signal-tile {
+  position: absolute;
+  top: 68rpx;
+  left: 50%;
+  width: 144rpx;
+  height: 144rpx;
+  margin-left: -72rpx;
+  border: 2rpx solid #fff;
+  border-radius: 44rpx;
+  background: linear-gradient(145deg, #fff, #edf3ff);
+  box-shadow:
+    0 18rpx 36rpx #234b9c16,
+    0 4rpx 8rpx #234b9c0a;
+  transform: rotate(-6deg);
+  transition:
+    transform 400ms ease,
+    background 300ms ease;
 }
-
-.availability-icon {
-  width: 34rpx;
-  height: 34rpx;
-  margin-right: 12rpx;
+.wifi-symbol {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  transform: rotate(6deg);
 }
-
-.ssid-row {
-  height: 96rpx;
-  margin-top: 34rpx;
-  padding: 0 30rpx;
+.signal-arc {
+  position: absolute;
+  left: 50%;
   box-sizing: border-box;
-  display: flex;
-  align-items: center;
-  border: 1rpx solid #d9e1df;
-  border-radius: 30rpx;
-  background: #ffffff;
-}
-
-.ssid-icon {
-  width: 42rpx;
-  height: 42rpx;
-  margin-right: 24rpx;
-  flex: none;
-}
-
-.ssid-text {
-  min-width: 0;
-  overflow: hidden;
-  color: #18211f;
-  font-size: 31rpx;
-  font-weight: 500;
-  line-height: 1.3;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.primary-button {
-  height: 96rpx;
-  margin-top: 28rpx;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border: 0;
-  border-radius: 30rpx;
-  background: linear-gradient(135deg, #14b7a0 0%, #079c87 100%);
-  color: #ffffff;
-  font-size: 32rpx;
-  font-weight: 700;
-  line-height: 96rpx;
-  letter-spacing: 0.4rpx;
-}
-
-.primary-button--disabled {
-  background: #edf6f4;
-  color: #8c9b98;
-}
-
-.button-spinner {
-  width: 26rpx;
-  height: 26rpx;
-  margin-right: 18rpx;
-  border: 4rpx solid rgba(140, 155, 152, 0.34);
-  border-top-color: #80908d;
+  border: 8rpx solid transparent;
+  border-top-color: #2563eb;
   border-radius: 50%;
-  animation: spin 800ms linear infinite;
+  transform: translateX(-50%);
 }
-
-.button-icon {
-  width: 34rpx;
-  height: 34rpx;
-  margin-right: 15rpx;
+.signal-arc--outer {
+  top: 39rpx;
+  width: 88rpx;
+  height: 88rpx;
 }
-
-.privacy-line {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  margin-top: 26rpx;
-  color: #87918f;
-  font-size: 23rpx;
-  line-height: 1.45;
-  text-align: center;
+.signal-arc--inner {
+  top: 64rpx;
+  width: 52rpx;
+  height: 52rpx;
 }
-
-.privacy-icon {
-  width: 28rpx;
-  height: 28rpx;
-  margin-right: 10rpx;
-  flex: none;
-}
-
-.status-section {
-  margin-top: 50rpx;
-}
-
-.status-label {
-  display: flex;
-  align-items: center;
-  margin-bottom: 18rpx;
-  color: #26312f;
-  font-size: 25rpx;
-  line-height: 1;
-}
-
-.status-dot {
+.signal-dot {
+  position: absolute;
+  top: 91rpx;
+  left: 50%;
   width: 13rpx;
   height: 13rpx;
-  margin-right: 14rpx;
+  margin-left: -6.5rpx;
   border-radius: 50%;
-  background: #7c8785;
+  background: #2563eb;
 }
-
-.status-dot--progress,
-.status-dot--success {
-  background: #0aa58f;
+.is-connecting .orbit-track {
+  animation: orbit 2400ms linear infinite;
 }
-
-.status-dot--danger {
-  background: #f04444;
+.is-connecting .orbit-dot {
+  background: #2563eb;
 }
-
-.status-card {
-  padding: 26rpx 28rpx;
-  border: 1rpx solid #dfe6e4;
-  border-radius: 30rpx;
-  background: #ffffff;
+.is-connecting .wifi-symbol {
+  animation: signal 1600ms ease-in-out infinite;
 }
-
-.status-card--progress {
-  border-color: #d6e8e4;
-  background: #fbfefd;
-}
-
-.status-card--success {
-  border-color: #cde8e1;
-  background: #f7fcfa;
-}
-
-.status-card--danger {
-  border-color: #f1dada;
-  background: #fffefe;
-}
-
-.status-heading-row {
-  display: flex;
-  align-items: center;
-}
-
-.status-title {
-  color: #17211f;
-  font-size: 30rpx;
-  font-weight: 700;
-  line-height: 1.4;
-}
-
-.status-message {
-  margin-top: 10rpx;
-  color: #697472;
-  font-size: 24rpx;
-  line-height: 1.65;
-}
-
-.status-spinner {
-  width: 30rpx;
-  height: 30rpx;
-  margin-right: 18rpx;
-  border: 4rpx solid #d7e5e2;
-  border-top-color: #0aa58f;
-  border-radius: 50%;
-  animation: spin 800ms linear infinite;
-}
-
-.status-symbol {
-  width: 34rpx;
-  height: 34rpx;
-  margin-right: 16rpx;
-  flex: none;
-}
-
-.progress-list {
-  margin-top: 26rpx;
-  padding-top: 24rpx;
-  border-top: 1rpx solid #e7eceb;
-}
-
-.progress-row {
-  display: flex;
-  align-items: center;
-  color: #65716f;
-  font-size: 25rpx;
-  line-height: 1.4;
-}
-
-.progress-row--spaced {
-  margin-top: 20rpx;
-}
-
-.progress-icon {
-  width: 30rpx;
-  height: 30rpx;
-  margin-right: 20rpx;
-  box-sizing: border-box;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 50%;
-  font-size: 20rpx;
-  line-height: 1;
-}
-
-.progress-icon--done {
-  background: #0aa58f;
-  color: #ffffff;
-}
-
-.progress-icon--active {
-  border: 4rpx solid #cae7e1;
-  border-top-color: #0aa58f;
-  animation: spin 800ms linear infinite;
-}
-
-.progress-icon--pending {
-  border: 3rpx solid #d9e1df;
-}
-
-.manual-toggle {
-  min-height: 64rpx;
-  margin: 18rpx auto 0;
-  padding: 0 14rpx;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border: 0;
-  background: transparent;
-  color: #079c87;
-  font-size: 25rpx;
-  font-weight: 500;
-  line-height: 1.4;
-}
-
-.manual-chevron {
-  width: 28rpx;
-  height: 28rpx;
-  margin-left: 12rpx;
-  transform: translateY(-2rpx);
-  transition: transform 160ms ease;
-}
-
-.manual-chevron--open {
-  transform: rotate(180deg) translateY(2rpx);
-}
-
-.troubleshooting-list {
+.network-wrap {
+  position: relative;
   margin-top: 8rpx;
-  padding: 20rpx 22rpx;
-  border: 1rpx solid #e4e9e8;
-  border-radius: 28rpx;
-  background: #ffffff;
+  animation: enter 560ms 60ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
 }
-
-.troubleshooting-row {
+.card-depth {
+  position: absolute;
+  inset: 14rpx 12rpx -14rpx;
+  border-radius: 32rpx;
+  background: #e8eef9;
+  transform: rotate(1deg);
+}
+.network-card {
+  position: relative;
+  padding: 8rpx 36rpx;
+  border: 2rpx solid #fff;
+  border-radius: 32rpx;
+  background: #fff;
+  box-shadow: 0 16rpx 40rpx #19345a0a;
+}
+.field {
+  padding: 32rpx 0;
+}
+.field + .field {
+  border-top: 1rpx solid #edf0f5;
+}
+.label {
+  display: block;
+  margin-bottom: 14rpx;
+  color: #6b7890;
+  font-size: 24rpx;
+  line-height: 1.5;
+}
+.value {
+  display: block;
+  color: #172845;
+  line-height: 1.45;
+  word-break: break-all;
+  white-space: pre-wrap;
+}
+.value--ssid {
+  font-size: 40rpx;
+  font-weight: 600;
+}
+.value--password {
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 32rpx;
+}
+.button-enter {
+  margin-top: 48rpx;
+  animation: enter 560ms 120ms ease-out both;
+}
+.primary-button {
   display: flex;
-  color: #687371;
-  font-size: 22rpx;
-  line-height: 1.65;
+  align-items: center;
+  justify-content: center;
+  min-height: 104rpx;
+  padding: 20rpx 36rpx;
+  border-radius: 28rpx;
+  background: #2563eb;
+  box-shadow: 0 12rpx 24rpx #2563eb24;
+  color: #fff;
+  font-size: 32rpx;
+  font-weight: 500;
+  line-height: 1.6;
+  transition:
+    transform 150ms ease,
+    background 250ms ease,
+    box-shadow 250ms ease;
 }
-
-.step-number {
-  width: 32rpx;
-  flex: none;
-  color: #4f5c59;
+.primary-button--pressed {
+  transform: scale(0.98);
+  background: #1d4ed8;
+  box-shadow: 0 4rpx 12rpx #2563eb24;
 }
-
-.provider-footer {
-  padding-top: 62rpx;
-  color: #8b9492;
-  font-size: 23rpx;
-  line-height: 1.4;
+.primary-button[disabled] {
+  background: #dce3ed;
+  box-shadow: none;
+  color: #64748b;
+}
+.is-connecting .primary-button[disabled] {
+  background: #2563eb;
+  color: #fff;
+}
+.primary-button::after {
+  border: 0;
+}
+.button-arrow {
+  width: 12rpx;
+  height: 12rpx;
+  margin-left: 20rpx;
+  border-top: 3rpx solid currentColor;
+  border-right: 3rpx solid currentColor;
+  transform: rotate(45deg);
+}
+.status-space {
+  min-height: 120rpx;
+  margin-top: 28rpx;
+}
+.status {
   text-align: center;
+  animation: enter 300ms ease-out both;
 }
-
-.diagnostics-entry {
-  min-height: 64rpx;
-  margin: 28rpx auto 0;
-  padding: 0 26rpx;
-  border: 1rpx dashed #8fb9b2;
-  border-radius: 18rpx;
-  background: #f6fbfa;
-  color: #087b6a;
-  font-size: 23rpx;
-  line-height: 64rpx;
+.status-title,
+.status-message {
+  display: block;
 }
-
-@keyframes spin {
+.status-title {
+  color: #52637f;
+  font-size: 28rpx;
+}
+.status-message {
+  margin-top: 12rpx;
+  color: #6b7890;
+  font-size: 24rpx;
+  line-height: 1.6;
+}
+.status--danger .status-title {
+  color: #b91c1c;
+}
+.phase-success .signal-tile {
+  transform: rotate(0);
+  background: #e9f8f0;
+}
+.phase-success .orbit-track {
+  border-color: #c6e8d6;
+}
+.phase-success .orbit-dot {
+  background: #65b78c;
+}
+.phase-success .primary-button[disabled] {
+  background: #16834e;
+  color: #fff;
+}
+.status--success .status-title {
+  color: #16834e;
+}
+.success-check {
+  position: absolute;
+  top: 42rpx;
+  left: 54rpx;
+  width: 28rpx;
+  height: 48rpx;
+  border-right: 8rpx solid #16834e;
+  border-bottom: 8rpx solid #16834e;
+  transform: rotate(45deg);
+  animation: checked 380ms cubic-bezier(0.2, 0.8, 0.3, 1.3) both;
+}
+.success-ring {
+  position: absolute;
+  top: 60rpx;
+  left: 50%;
+  width: 160rpx;
+  height: 160rpx;
+  margin-left: -80rpx;
+  border: 2rpx solid #8dcfac;
+  border-radius: 50%;
+  opacity: 0;
+  animation: ripple 600ms ease-out;
+}
+.motion-paused .signal-stage,
+.motion-paused .orbit-track,
+.motion-paused .wifi-symbol,
+.motion-paused .network-wrap,
+.motion-paused .button-enter,
+.motion-paused .status,
+.motion-paused .success-check,
+.motion-paused .success-ring {
+  animation-play-state: paused;
+}
+@keyframes enter {
+  from {
+    opacity: 0;
+    transform: translateY(20rpx);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@keyframes orbit {
   to {
     transform: rotate(360deg);
+  }
+}
+@keyframes signal {
+  50% {
+    opacity: 0.45;
+  }
+}
+@keyframes checked {
+  from {
+    opacity: 0;
+    transform: rotate(45deg) scale(0.5);
+  }
+  to {
+    opacity: 1;
+    transform: rotate(45deg) scale(1);
+  }
+}
+@keyframes ripple {
+  from {
+    opacity: 0.7;
+    transform: scale(0.8);
+  }
+  to {
+    opacity: 0;
+    transform: scale(1.6);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .signal-stage,
+  .is-connecting .orbit-track,
+  .is-connecting .wifi-symbol,
+  .network-wrap,
+  .button-enter,
+  .status,
+  .success-check,
+  .success-ring {
+    animation: none;
+  }
+  .signal-tile,
+  .primary-button {
+    transition: none;
   }
 }

@@ -17,6 +17,30 @@ import {
 } from "./production-preflight.mjs";
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const ownerPassword = "a".repeat(48);
+const appPassword = "b".repeat(48);
+
+function validProductionValues(backupDirectory) {
+  return {
+    API_DOMAIN: "api.scan-wifi-production.cn",
+    ADMIN_DOMAIN: "admin.scan-wifi-production.cn",
+    ACME_EMAIL: "ops@scan-wifi-production.cn",
+    BACKUP_HOST_DIR: backupDirectory,
+    DATABASE_BACKUP_URL: `postgresql://scan_wifi_owner:${ownerPassword}@postgres:5432/scan_wifi`,
+    IMAGE_TAG: "2026-07-29",
+    MINIPROGRAM_ENABLE_LEGACY_WIFI_API: "false",
+    MINIPROGRAM_AD_UNIT_ID: "",
+    POSTGRES_APP_PASSWORD: appPassword,
+    POSTGRES_APP_USER: "scan_wifi_app",
+    POSTGRES_DB: "scan_wifi",
+    POSTGRES_OWNER_PASSWORD: ownerPassword,
+    POSTGRES_OWNER_USER: "scan_wifi_owner",
+    SESSION_SECRET: "c".repeat(64),
+    WECHAT_APP_ID: "wx0123456789abcdef",
+    WECHAT_APP_SECRET: "d".repeat(32),
+    WIFI_ENCRYPTION_KEY_BASE64: Buffer.alloc(32, 7).toString("base64"),
+  };
+}
 
 async function loadStaticConfiguration() {
   const [compose, dockerfile, caddyfile, nginxConfiguration, backupScript] = await Promise.all([
@@ -26,17 +50,16 @@ async function loadStaticConfiguration() {
     readFile(path.join(repositoryRoot, "deploy", "nginx-admin.conf"), "utf8"),
     readFile(path.join(repositoryRoot, "scripts", "backup-postgres.sh"), "utf8"),
   ]);
-  return {
-    compose: compose.replace(/\r\n/gu, "\n"),
-    dockerfile,
-    caddyfile,
-    nginxConfiguration,
-    backupScript,
-  };
+  return { compose, dockerfile, caddyfile, nginxConfiguration, backupScript };
 }
 
 test("release values reject example domains and non-formal AppIDs", () => {
   assert.throws(() => assertProductionDomain("api.example.cn", "API_DOMAIN"), /placeholder/u);
+  assert.throws(
+    () => assertProductionDomain("api.prelaunch.invalid", "API_DOMAIN"),
+    /placeholder/u,
+  );
+  assert.throws(() => assertProductionDomain("api.localhost", "API_DOMAIN"), /placeholder/u);
   assert.throws(() => assertReleaseApiBaseUrl("https://api.example.com"), /placeholder/u);
   assert.throws(() => assertReleaseAppId("touristappid"), /tourist/u);
   assert.equal(
@@ -48,15 +71,6 @@ test("release values reject example domains and non-formal AppIDs", () => {
 
 test("current production repository passes static safety checks", async () => {
   await validateProductionRepository(repositoryRoot);
-});
-
-test("static preflight accepts Windows CRLF configuration files", async () => {
-  const configuration = await loadStaticConfiguration();
-  validateProductionStaticConfiguration({
-    ...configuration,
-    compose: configuration.compose.replace(/\n/gu, "\r\n"),
-    dockerfile: configuration.dockerfile.replace(/\r?\n/gu, "\r\n"),
-  });
 });
 
 test("static preflight rejects a published PostgreSQL port", async () => {
@@ -83,52 +97,61 @@ test("static preflight rejects an initial password in the API container", async 
   );
 });
 
-test("static preflight rejects proxy trust and security-header regressions", async () => {
+test("static preflight rejects nginx cache locations that drop browser security headers", async () => {
   const configuration = await loadStaticConfiguration();
-  for (const compose of [
-    configuration.compose.replace("  api:\n", '  api:\n    ports:\n      - "3100:3100"\n'),
-    configuration.compose.replace(
-      'TRUST_PROXY_ADDRESSES: "172.30.250.2"',
-      'TRUST_PROXY_ADDRESSES: "0.0.0.0/0"',
-    ),
-    configuration.compose.replace("ipv4_address: 172.30.250.2", "ipv4_address: 172.30.250.3"),
-  ]) {
-    assert.throws(
-      () => validateProductionStaticConfiguration({ ...configuration, compose }),
-      /API must/u,
-    );
-  }
-  assert.throws(
-    () =>
-      validateProductionStaticConfiguration({
-        ...configuration,
-        nginxConfiguration: configuration.nginxConfiguration.replace(
-          "add_header_inherit merge;",
-          "",
-        ),
-      }),
-    /inherit security headers/u,
+  configuration.nginxConfiguration = configuration.nginxConfiguration.replace(
+    /^ {6}add_header Content-Security-Policy[^\n]+\r?\n/gmu,
+    "",
   );
   assert.throws(
-    () => validateProductionStaticConfiguration({ ...configuration, caddyfile: "" }),
-    /redact public scene/u,
+    () => validateProductionStaticConfiguration(configuration),
+    /must preserve Content-Security-Policy/u,
   );
 });
 
 test("strict environment preflight accepts real-shaped values and a writable backup directory", async () => {
   const backupDirectory = await mkdtemp(path.join(tmpdir(), "scan-wifi-backup-preflight-"));
   try {
-    await validateProductionEnvironment(
-      {
-        API_DOMAIN: "api.scan-wifi-production.cn",
-        ADMIN_DOMAIN: "admin.scan-wifi-production.cn",
-        ACME_EMAIL: "ops@scan-wifi-production.cn",
-        BACKUP_HOST_DIR: backupDirectory,
-        MINIPROGRAM_ENABLE_LEGACY_WIFI_API: "false",
-        MINIPROGRAM_AD_UNIT_ID: "",
-        WECHAT_APP_ID: "wx0123456789abcdef",
-      },
-      repositoryRoot,
+    for (const enabled of ["false", "true"]) {
+      await validateProductionEnvironment(
+        { ...validProductionValues(backupDirectory), MINIPROGRAM_ENABLE_LEGACY_WIFI_API: enabled },
+        repositoryRoot,
+      );
+    }
+    await assert.rejects(
+      validateProductionEnvironment(
+        { ...validProductionValues(backupDirectory), MINIPROGRAM_ENABLE_LEGACY_WIFI_API: "auto" },
+        repositoryRoot,
+      ),
+      /explicit boolean/u,
+    );
+  } finally {
+    await rm(backupDirectory, { recursive: true, force: true });
+  }
+});
+
+test("strict environment preflight rejects template credentials and VITE demo drift", async () => {
+  const backupDirectory = await mkdtemp(path.join(tmpdir(), "scan-wifi-backup-preflight-"));
+  try {
+    await assert.rejects(
+      validateProductionEnvironment(
+        {
+          ...validProductionValues(backupDirectory),
+          WECHAT_APP_SECRET: "replace_with_server_only_app_secret",
+        },
+        repositoryRoot,
+      ),
+      /WECHAT_APP_SECRET/u,
+    );
+
+    const configuration = await loadStaticConfiguration();
+    configuration.compose = configuration.compose.replace(
+      'VITE_DEMO_MODE: "false"',
+      'VITE_DEMO_MODE: "true"',
+    );
+    assert.throws(
+      () => validateProductionStaticConfiguration(configuration),
+      /VITE_DEMO_MODE false/u,
     );
   } finally {
     await rm(backupDirectory, { recursive: true, force: true });

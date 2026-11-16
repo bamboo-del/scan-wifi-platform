@@ -19,7 +19,7 @@ async function generateManifest(production: boolean): Promise<Record<string, unk
   await writeFile(
     sourcePath,
     JSON.stringify({
-      pages: ["pages/connect/index"],
+      pages: ["pages/connect/index", "pages/manage/list", "pages/success/index"],
       window: { navigationBarTitleText: "Wi-Fi" },
       lazyCodeLoading: "requiredComponents",
     }),
@@ -50,5 +50,6 @@ describe("mini-program manifest generation", () => {
     expect((manifest.pages as string[]).includes("pages/wifi-diagnostics/index")).toBe(
       diagnosticsExpected,
     );
+    if (production) expect(manifest.pages).toEqual(["pages/connect/index"]);
   });
 });

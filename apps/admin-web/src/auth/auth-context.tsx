@@ -1,7 +1,7 @@
 import * as React from "react";
 
 import { Spinner } from "@/components/ui/spinner";
-import { api, ApiError, SESSION_EXPIRED_EVENT } from "@/lib/api";
+import { api, ApiError } from "@/lib/api";
 import type { AdminIdentity } from "@/lib/types";
 
 interface AuthContextValue {
@@ -19,11 +19,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }): React
 
   React.useEffect(() => {
     let active = true;
-    const expireSession = (): void => {
-      setAdmin(null);
-      setStatus("anonymous");
-    };
-    window.addEventListener(SESSION_EXPIRED_EVENT, expireSession);
     void api
       .session()
       .then((session) => {
@@ -41,7 +36,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }): React
       });
     return () => {
       active = false;
-      window.removeEventListener(SESSION_EXPIRED_EVENT, expireSession);
     };
   }, []);
 

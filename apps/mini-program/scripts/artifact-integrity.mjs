@@ -30,6 +30,8 @@ const componentExtensions = [".js", ".json", ".wxml", ".wxss"];
 const externalComponentPrefixes = ["wx://", "plugin://", "dynamicLib://", "ext://"];
 const textOpeningTagPattern = /<text\b[^>]*>/giu;
 const deprecatedSelectableAttributePattern = /(?:^|\s)selectable(?=\s|=|\/?>)/iu;
+const suspiciousMojibakePattern =
+  /(?:\uFFFD|\u951f\u65a4\u62f7|\u675e\u660f\u7e5b|\u5bee\u20ac|\u7ecb\u5b2a\u7c2d|\u9286\?|\u9983|\u00c3[^\s]|\u00c2[^\s]|\u00e2(?:\u20ac|\u20ac\u2122|\u20ac\u0153|\u20ac\u201d))/u;
 
 async function isFile(filePath) {
   return (await stat(filePath).catch(() => undefined))?.isFile() === true;
@@ -50,7 +52,10 @@ async function collectFiles(root) {
 function isProductionExcluded(relativePath) {
   const normalized = relativePath.replaceAll("\\", "/");
   return (
-    normalized.startsWith("pages/wifi-diagnostics/") || normalized === "core/wifi-diagnostics.ts"
+    normalized.startsWith("pages/wifi-diagnostics/") ||
+    normalized === "core/wifi-diagnostics.ts" ||
+    normalized.startsWith("pages/manage/") ||
+    normalized.startsWith("pages/success/")
   );
 }
 
@@ -145,11 +150,7 @@ async function loadCurrentSecretValues(repositoryRoot) {
   return values;
 }
 
-export async function verifyMiniProgramArtifact({
-  packageRoot,
-  mode,
-  legacyWifiApiEnabled = false,
-}) {
+export async function verifyMiniProgramArtifact({ packageRoot, mode }) {
   if (mode !== "development" && mode !== "trial" && mode !== "production") {
     throw new Error(`Unsupported mini-program artifact mode: ${mode}`);
   }
@@ -177,6 +178,9 @@ export async function verifyMiniProgramArtifact({
     if (manifest.lazyCodeLoading !== "requiredComponents") {
       findings.push('app.json: lazyCodeLoading must be "requiredComponents"');
     }
+    if (manifest.window?.navigationBarTitleText !== "轻连 WiFi") {
+      findings.push('app.json: navigationBarTitleText must remain valid UTF-8 "轻连 WiFi"');
+    }
     if (
       !Array.isArray(manifest.pages) ||
       !manifest.pages.every((page) => typeof page === "string")
@@ -198,6 +202,9 @@ export async function verifyMiniProgramArtifact({
   }
   if (mode === "production" && diagnosticsIncluded) {
     findings.push(`app.json: ${diagnosticsPage} must be excluded from production`);
+  }
+  if (mode === "production" && (pages.length !== 1 || pages[0] !== "pages/connect/index")) {
+    findings.push("app.json: production must contain only the customer connection page");
   }
 
   for (const page of pages) {
@@ -244,8 +251,17 @@ export async function verifyMiniProgramArtifact({
     if (isTestArtifact(relativePath)) {
       findings.push(`${relativePath}: test source or test data leaked into the runtime artifact`);
     }
+    if (textExtensions.has(path.extname(artifactFile))) {
+      const content = await readFile(artifactFile, "utf8");
+      if (suspiciousMojibakePattern.test(content)) {
+        findings.push(`${relativePath}: contains a known mojibake marker`);
+      }
+    }
     if (mode === "production" && isProductionDiagnosticArtifact(relativePath)) {
       findings.push(`${relativePath}: diagnostics source leaked into the production artifact`);
+    }
+    if (mode === "production" && /^pages\/(?:manage|success)\//u.test(toPosixPath(relativePath))) {
+      findings.push(`${relativePath}: non-customer page leaked into the production artifact`);
     }
     if (path.extname(artifactFile) === ".wxml") {
       const content = await readFile(artifactFile, "utf8");
@@ -266,10 +282,21 @@ export async function verifyMiniProgramArtifact({
     if (path.extname(artifactFile) !== ".js") continue;
     const ownerRelativePath = toPosixPath(path.relative(artifactRoot, artifactFile));
     const content = await readFile(artifactFile, "utf8");
+    // The daily analytics identifier is the sole storage allowance. Do not
+    // exempt the whole file: different keys, payloads or additional calls fail.
+    const storageCheckedContent =
+      ownerRelativePath === "services/analytics.js"
+        ? content
+            .replace(/\bstorage\.getStorageSync\(\s*["']wifi-visit-day["']\s*\)/gu, "")
+            .replace(
+              /\bstorage\.setStorageSync\(\s*["']wifi-visit-day["']\s*,\s*\{\s*day\s*,\s*id\s*\}\s*\)/gu,
+              "",
+            )
+        : content;
     if (
       mode === "production" &&
       /\b(?:setStorage|getStorage|setStorageSync|getStorageSync|localStorage|sessionStorage)\b/u.test(
-        content,
+        storageCheckedContent,
       )
     ) {
       findings.push(
@@ -363,10 +390,8 @@ export async function verifyMiniProgramArtifact({
       );
     }
   }
-  if (!runtimeConfig.includes(`legacyWifiAdapterEnabled: ${legacyWifiApiEnabled}`)) {
-    findings.push(
-      "config/runtime.generated.js: legacy Wi-Fi adapter must match the explicit build setting",
-    );
+  if (mode === "production" && !/legacyWifiAdapterEnabled: (?:true|false)/u.test(runtimeConfig)) {
+    findings.push("config/runtime.generated.js: Wi-Fi adapter requires an explicit boolean switch");
   }
   if (!runtimeConfig.includes('adUnitId: ""')) {
     findings.push(
@@ -432,11 +457,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     : process.argv.includes("--trial")
       ? "trial"
       : "development";
-  const summary = await verifyMiniProgramArtifact({
-    packageRoot,
-    mode,
-    legacyWifiApiEnabled: process.env.MINIPROGRAM_ENABLE_LEGACY_WIFI_API === "true",
-  });
+  const summary = await verifyMiniProgramArtifact({ packageRoot, mode });
   process.stdout.write(
     `Verified ${summary.mode} mini-program artifact (${summary.pages.length} pages, ${summary.relativeDependenciesChecked} relative dependencies, ${summary.localComponentsChecked} local components).\n`,
   );

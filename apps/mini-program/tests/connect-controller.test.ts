@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { ConnectController } from "../src/core/connect-controller";
+import { PublicApiError } from "../src/platform/public-api";
 import { LegacyWeChatWifiAdapter } from "../src/core/legacy-wechat-wifi-adapter";
 import type {
   ConnectViewState,
@@ -15,14 +16,16 @@ import type {
 } from "../src/platform/wechat-types";
 
 const SCENE = "0123456789abcdef0123456789abcdef";
-const PASSWORD = "never-put-this-in-view-state";
+const PASSWORD = "customer-visible-password";
 const CONFIG: PublicConnectConfig = {
   store: {
+    id: "store-test",
     name: "南山咖啡·科技园店",
     shortName: null,
     logoUrl: null,
   },
   wifi: {
+    id: "wifi-test",
     ssid: "NanshanCoffee-FreeWiFi",
     bssid: null,
     securityType: null,
@@ -37,9 +40,17 @@ const CONFIG: PublicConnectConfig = {
 };
 
 class MockPublicApi implements PublicApi {
+  readonly getWifiCredential = vi.fn(() =>
+    Promise.resolve({
+      wifiId: CONFIG.wifi.id,
+      storeId: CONFIG.store.id,
+      ssid: CONFIG.wifi.ssid,
+      password: PASSWORD,
+      bssid: null,
+    }),
+  );
   readonly events: PublicEventInput[] = [];
   readonly getConnectConfig = vi.fn(() => Promise.resolve(CONFIG));
-  readonly getCredential = vi.fn(() => Promise.resolve({ ...CONFIG.wifi, password: PASSWORD }));
   readonly reportEvent = vi.fn((event: PublicEventInput) => {
     this.events.push(event);
     return Promise.resolve();
@@ -49,14 +60,23 @@ class MockPublicApi implements PublicApi {
 
 function createWifiApi(outcomes: ReadonlyArray<"success" | number>) {
   const queue = [...outcomes];
+  let connected = false;
   let listener: WifiConnectedListener | null = null;
   return {
+    getConnectedWifi: vi.fn<NonNullable<LegacyWifiWxApi["getConnectedWifi"]>>((options) =>
+      connected
+        ? options.success({
+            wifi: { SSID: CONFIG.wifi.ssid, BSSID: "", secure: true, signalStrength: 80 },
+          })
+        : options.fail({ errMsg: "not connected" }),
+    ),
     startWifi: vi.fn((options: WifiOperationOptions) => {
       options.success?.({ errMsg: "startWifi:ok" });
     }),
     connectWifi: vi.fn((options: ConnectWifiOptions) => {
       const outcome = queue.shift();
       if (outcome === "success") {
+        connected = true;
         options.success?.({ errMsg: "connectWifi:ok" });
         listener?.({
           wifi: {
@@ -96,6 +116,7 @@ function createHarness(outcomes: ReadonlyArray<"success" | number>) {
   const states: ConnectViewState[] = [];
   const controller = new ConnectController({
     api,
+    enableAds: true,
     wifi,
     platform: "android",
     onChange: (state) => states.push(state),
@@ -104,6 +125,213 @@ function createHarness(outcomes: ReadonlyArray<"success" | number>) {
 }
 
 describe("ConnectController", () => {
+  it("clears the previous network password on a new or invalid scan", async () => {
+    const { controller, api } = createHarness([]);
+    await controller.load(SCENE);
+    expect(controller.viewState.password).toBe(PASSWORD);
+    let finish!: (value: PublicConnectConfig) => void;
+    api.getConnectConfig.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const pending = controller.load("a".repeat(32));
+    expect(controller.viewState.password).toBe("");
+    await controller.load("invalid");
+    finish(CONFIG);
+    await pending;
+    expect(controller.viewState.password).toBe("");
+    expect(controller.viewState.hasConfig).toBe(false);
+    controller.dispose();
+  });
+
+  it("rejects credentials for a different network and never renders their password", async () => {
+    const { controller, api, states } = createHarness([]);
+    api.getWifiCredential.mockResolvedValueOnce({
+      storeId: CONFIG.store.id,
+      wifiId: "other-network",
+      ssid: "Other",
+      password: "other-password",
+      bssid: null,
+    });
+    await controller.load(SCENE);
+    expect(controller.viewState.hasConfig).toBe(false);
+    expect(JSON.stringify(states)).not.toContain("other-password");
+    controller.dispose();
+  });
+
+  it("uses the updated password at button click without changing the printed scene", async () => {
+    const { controller, api, wifiApi } = createHarness(["success"]);
+    await controller.load(SCENE);
+    api.getWifiCredential.mockResolvedValueOnce({
+      storeId: CONFIG.store.id,
+      wifiId: CONFIG.wifi.id,
+      ssid: CONFIG.wifi.ssid,
+      password: "replacement-password",
+      bssid: null,
+    });
+    await controller.connect();
+    expect(wifiApi.connectWifi).toHaveBeenCalledWith(
+      expect.objectContaining({ password: "replacement-password" }),
+    );
+    expect(controller.viewState.password).toBe("replacement-password");
+    expect(JSON.stringify(api.events)).not.toContain("replacement-password");
+    controller.dispose();
+    expect(controller.viewState.password).toBe("");
+  });
+
+  it.each(["connect", "copyPassword"] as const)(
+    "blocks %s when the merchant pauses after page lookup",
+    async (action) => {
+      const { controller, api, wifiApi } = createHarness(["success"]);
+      await controller.load(SCENE);
+      api.getWifiCredential.mockRejectedValue(new PublicApiError("SPOT_DISABLED"));
+      await controller[action]();
+      expect(controller.viewState).toMatchObject({
+        phase: "disabled",
+        buttonDisabled: true,
+        hasConfig: false,
+        password: "",
+      });
+      expect(wifiApi.connectWifi).not.toHaveBeenCalled();
+      controller.dispose();
+    },
+  );
+  it("reloads after a transient credential request failure", async () => {
+    const { controller, api } = createHarness(["success"]);
+    await controller.load(SCENE);
+    api.getWifiCredential.mockRejectedValueOnce(new PublicApiError("NETWORK_ERROR"));
+    await controller.connect();
+    expect(controller.viewState).toMatchObject({
+      phase: "failed",
+      buttonDisabled: false,
+      hasConfig: false,
+    });
+    await controller.retry();
+    expect(controller.viewState.phase).toBe("waiting");
+    expect(api.getConnectConfig).toHaveBeenCalledTimes(2);
+    controller.dispose();
+  });
+  it("fetches only the scanned network password and refreshes it before connecting", async () => {
+    const { controller, api } = createHarness(["success"]);
+    await controller.load(undefined);
+    expect(controller.viewState.phase).toBe("idle");
+    expect(api.getConnectConfig).not.toHaveBeenCalled();
+    expect(api.getWifiCredential).not.toHaveBeenCalled();
+    await controller.load(SCENE);
+    expect(api.getWifiCredential).toHaveBeenCalledWith(SCENE);
+    expect(controller.viewState.password).toBe(PASSWORD);
+    await controller.connect();
+    expect(api.getWifiCredential).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([12002, 12005, 12007, 12008, 12003, 12010])(
+    "offers a human-readable fallback for %s",
+    async (code) => {
+      const { controller, api } = createHarness([code]);
+      await controller.load(SCENE);
+      await controller.connect();
+      expect(controller.viewState.statusTitle).not.toContain(String(code));
+      expect(controller.viewState.troubleshootingExpanded).toBe(true);
+      expect(api.events.at(-1)).toMatchObject({
+        eventType: "connect_failure",
+        errorCode: String(code),
+        platform: "android",
+      });
+    },
+  );
+
+  it("copies a freshly fetched password while automatic connection and ads are disabled", async () => {
+    const api = new MockPublicApi();
+    api.getConnectConfig.mockResolvedValue({
+      ...CONFIG,
+      compatibility: { legacyWifiApiEnabled: false },
+    });
+    const copyToClipboard = vi.fn(() => Promise.resolve());
+    const wifiApi = createWifiApi([]);
+    const controller = new ConnectController({
+      api,
+      wifi: new LegacyWeChatWifiAdapter(wifiApi, {
+        enabled: false,
+        timeoutMs: 100,
+        manualSystemConnection: false,
+      }),
+      platform: "ios",
+      copyToClipboard,
+      onChange: vi.fn(),
+    });
+    await controller.load(SCENE);
+    await controller.copyPassword();
+    expect(copyToClipboard).toHaveBeenCalledWith(PASSWORD);
+    expect(controller.viewState.phase).toBe("manual");
+    expect(controller.viewState.statusMessage).toContain(CONFIG.wifi.ssid);
+    expect(controller.viewState.adEligible).toBe(false);
+    expect(api.events.at(-1)?.eventType).toBe("password_copy");
+    expect(wifiApi.startWifi).not.toHaveBeenCalled();
+    expect(controller.viewState.password).toBe(PASSWORD);
+  });
+
+  it("deduplicates clicks while credentials load and ignores completion after unload", async () => {
+    const { controller, api, wifiApi } = createHarness(["success"]);
+    await controller.load(SCENE);
+    let finish!: (value: Awaited<ReturnType<typeof api.getWifiCredential>>) => void;
+    api.getWifiCredential.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const pending = controller.connect();
+    await controller.connect();
+    expect(api.getWifiCredential).toHaveBeenCalledTimes(2);
+    controller.dispose();
+    finish({
+      storeId: CONFIG.store.id,
+      wifiId: CONFIG.wifi.id,
+      ssid: CONFIG.wifi.ssid,
+      password: PASSWORD,
+      bssid: null,
+    });
+    await pending;
+    expect(wifiApi.startWifi).not.toHaveBeenCalled();
+    expect(controller.viewState.password).toBe("");
+    expect(api.events.filter((event) => event.eventType === "connect_click")).toHaveLength(1);
+  });
+
+  it("handles nonexistent scenes and credential request failure without leaking external errors", async () => {
+    const { controller, api } = createHarness(["success"]);
+    api.getConnectConfig.mockRejectedValueOnce(new Error("external sensitive message"));
+    await controller.load(SCENE);
+    expect(controller.viewState.hasConfig).toBe(false);
+    await controller.load(SCENE);
+    api.getWifiCredential.mockRejectedValueOnce(new Error(PASSWORD));
+    await controller.connect();
+    expect(controller.viewState.phase).toBe("failed");
+    expect(JSON.stringify(api.events)).not.toContain(PASSWORD);
+  });
+
+  it("connects successfully when telemetry rejects and both advertising and analytics are off", async () => {
+    const api = new MockPublicApi();
+    api.reportEvent.mockRejectedValue(new Error("offline"));
+    const controller = new ConnectController({
+      api,
+      wifi: new LegacyWeChatWifiAdapter(createWifiApi(["success"]), {
+        enabled: true,
+        timeoutMs: 100,
+        manualSystemConnection: false,
+      }),
+      platform: "ios",
+      enableAds: false,
+      enableAnalytics: false,
+      onChange: vi.fn(),
+    });
+    await controller.load(SCENE);
+    await controller.connect();
+    expect(controller.viewState.phase).toBe("success");
+    expect(api.reportEvent).not.toHaveBeenCalled();
+    expect(controller.viewState.adEligible).toBe(false);
+  });
   it("keeps ad failure independent from a successful connection", async () => {
     const { api, controller } = createHarness(["success"]);
     await controller.load(SCENE);
@@ -116,6 +344,7 @@ describe("ConnectController", () => {
     expect(controller.viewState.phase).toBe("success");
     expect(api.events.map((event) => event.eventType)).toEqual([
       "page_view",
+      "scan",
       "ad_load_failure",
       "connect_click",
       "connect_success",
@@ -134,7 +363,6 @@ describe("ConnectController", () => {
     expect(controller.viewState.phase).toBe("success");
     expect(wifiApi.connectWifi).toHaveBeenCalledTimes(2);
     expect(api.getConnectConfig).toHaveBeenCalledTimes(1);
-    expect(api.getCredential).toHaveBeenCalledTimes(2);
   });
 
   it("reports only normalized failure details and never the password", async () => {
@@ -145,7 +373,7 @@ describe("ConnectController", () => {
     const failure = api.events.find((event) => event.eventType === "connect_failure");
     expect(failure).toMatchObject({ errorCode: "12002" });
     expect(JSON.stringify(failure)).not.toContain(PASSWORD);
-    expect(JSON.stringify(controller.viewState)).not.toContain(PASSWORD);
+    expect(controller.viewState.password).toBe(PASSWORD);
   });
 
   it("shows unsupported when backend verification is disabled", async () => {
@@ -157,6 +385,7 @@ describe("ConnectController", () => {
     const wifiApi = createWifiApi(["success"]);
     const controller = new ConnectController({
       api,
+      enableAds: true,
       wifi: new LegacyWeChatWifiAdapter(wifiApi, {
         enabled: true,
         timeoutMs: 20_000,
@@ -170,7 +399,6 @@ describe("ConnectController", () => {
     expect(controller.viewState.phase).toBe("unsupported");
     expect(controller.viewState.buttonDisabled).toBe(true);
     expect(wifiApi.startWifi).not.toHaveBeenCalled();
-    expect(api.getCredential).not.toHaveBeenCalled();
   });
 
   it("does not mount an ad without both the effective switch and a unit ID", async () => {
@@ -182,6 +410,7 @@ describe("ConnectController", () => {
     const wifiApi = createWifiApi(["success"]);
     const controller = new ConnectController({
       api,
+      enableAds: true,
       wifi: new LegacyWeChatWifiAdapter(wifiApi, {
         enabled: true,
         timeoutMs: 20_000,
@@ -205,6 +434,7 @@ describe("ConnectController", () => {
     const wifiApi = createWifiApi(["success"]);
     const controller = new ConnectController({
       api,
+      enableAds: true,
       wifi: new LegacyWeChatWifiAdapter(wifiApi, {
         enabled: true,
         timeoutMs: 20_000,
@@ -212,14 +442,14 @@ describe("ConnectController", () => {
       }),
       platform: "ios",
       adUnitId: " adunit-build-time ",
-      brandName: " 用户网络 ",
+      brandName: " 门店网络 ",
       onChange: vi.fn(),
     });
 
     await controller.load(SCENE);
     expect(controller.viewState.adEligible).toBe(true);
     expect(controller.viewState.adUnitId).toBe("adunit-build-time");
-    expect(controller.viewState.brandName).toBe("用户网络");
+    expect(controller.viewState.brandName).toBe("门店网络");
 
     api.getConnectConfig.mockResolvedValue({
       ...CONFIG,
@@ -242,6 +472,7 @@ describe("ConnectController", () => {
     expect(controller.viewState.adCollapsed).toBe(true);
     expect(api.events.map((event) => event.eventType)).toEqual([
       "page_view",
+      "scan",
       "ad_load_failure",
       "ad_load_success",
     ]);
@@ -256,72 +487,5 @@ describe("ConnectController", () => {
     controller.toggleTroubleshooting();
     expect(controller.viewState.troubleshootingExpanded).toBe(false);
     expect(api.getConnectConfig).not.toHaveBeenCalled();
-  });
-
-  it("fetches fresh credentials only on click and uses the current network", async () => {
-    const { api, wifiApi, controller } = createHarness(["success"]);
-    await controller.load(SCENE);
-    expect(api.getCredential).not.toHaveBeenCalled();
-    api.getCredential.mockResolvedValue({
-      ...CONFIG.wifi,
-      ssid: "Updated-Network",
-      password: "updated-password",
-    });
-
-    await controller.connect();
-    expect(wifiApi.connectWifi).toHaveBeenCalledWith(
-      expect.objectContaining({ SSID: "Updated-Network", password: "updated-password" }),
-    );
-    expect(controller.viewState.ssid).toBe("Updated-Network");
-    expect(JSON.stringify(controller.viewState)).not.toContain("updated-password");
-  });
-
-  it("blocks duplicate clicks and discards credentials received after unload", async () => {
-    const { api, wifiApi, controller } = createHarness(["success"]);
-    await controller.load(SCENE);
-    let resolveCredential: ((value: typeof CONFIG.wifi & { password: string }) => void) | undefined;
-    api.getCredential.mockImplementation(
-      () =>
-        new Promise((resolve) => {
-          resolveCredential = resolve;
-        }),
-    );
-    const pending = controller.connect();
-    await controller.connect();
-    expect(api.getCredential).toHaveBeenCalledTimes(1);
-    controller.dispose();
-    resolveCredential?.({ ...CONFIG.wifi, password: PASSWORD });
-    await pending;
-    expect(wifiApi.connectWifi).not.toHaveBeenCalled();
-  });
-
-  it("does not connect with a stale password when credentials are rejected", async () => {
-    const { api, wifiApi, controller } = createHarness(["success"]);
-    await controller.load(SCENE);
-    api.getCredential.mockRejectedValue(new Error("disabled store or rotated scene"));
-    await expect(controller.connect()).resolves.toBeUndefined();
-    expect(controller.viewState.phase).toBe("failed");
-    expect(controller.viewState.buttonDisabled).toBe(false);
-    expect(wifiApi.startWifi).not.toHaveBeenCalled();
-    expect(JSON.stringify(api.events)).not.toContain("disabled store");
-  });
-
-  it("normalizes unexpected adapter exceptions and permits retry", async () => {
-    const api = new MockPublicApi();
-    const controller = new ConnectController({
-      api,
-      wifi: {
-        isAvailable: () => true,
-        connect: () => Promise.reject(new Error(PASSWORD)),
-        dispose: vi.fn(),
-      },
-      platform: "android",
-      onChange: vi.fn(),
-    });
-    await controller.load(SCENE);
-    await expect(controller.connect()).resolves.toBeUndefined();
-    expect(controller.viewState.phase).toBe("failed");
-    expect(controller.viewState.buttonDisabled).toBe(false);
-    expect(JSON.stringify(api.events)).not.toContain(PASSWORD);
   });
 });

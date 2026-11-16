@@ -1,5 +1,9 @@
+import { AdService } from "../services/ad";
+import { AnalyticsService } from "../services/analytics";
+import { getInternalWifiError } from "./wifi-errors";
 import { parseSceneToken } from "./scene";
-import { normalizeWifiError } from "./wifi-errors";
+import { lookupFailure } from "./lookup-errors";
+import { PublicApiError } from "../platform/public-api";
 import type {
   ConnectViewState,
   EventPlatform,
@@ -9,12 +13,14 @@ import type {
   PublicEventType,
   WifiConnector,
   WifiConnectStage,
-  WifiConnectResult,
-  WifiConnectionSettings,
 } from "./types";
 
 export interface ConnectControllerOptions {
   readonly api: PublicApi;
+  readonly enableAds?: boolean;
+  readonly enableAnalytics?: boolean;
+  readonly visitorId?: () => string | undefined;
+  readonly copyToClipboard?: (password: string) => Promise<void>;
   readonly wifi: WifiConnector;
   readonly platform: EventPlatform;
   readonly adUnitId?: string;
@@ -26,13 +32,14 @@ const INITIAL_STATE: ConnectViewState = {
   phase: "waiting",
   configLoading: true,
   hasConfig: false,
-  storeName: "正在读取用户信息",
+  storeName: "正在读取门店信息",
   brandName: "轻连 WiFi",
   logoUrl: null,
   ssid: "—",
+  password: "",
   buttonLabel: "正在读取网络…",
   buttonDisabled: true,
-  statusTitle: "正在读取用户信息",
+  statusTitle: "正在读取门店信息",
   statusMessage: "请稍候",
   statusTone: "progress",
   initialized: false,
@@ -42,13 +49,15 @@ const INITIAL_STATE: ConnectViewState = {
   adUnitId: "",
 };
 
-function unsupportedState(): Partial<ConnectViewState> {
+function unsupportedState(enabled = false): Partial<ConnectViewState> {
   return {
     phase: "unsupported",
     buttonLabel: "自动连接暂不可用",
     buttonDisabled: true,
-    statusTitle: "自动连接暂未开放",
-    statusMessage: "该能力需完成当前小程序真机验证后由平台开启。",
+    statusTitle: enabled ? "当前微信暂不支持自动连接" : "自动连接尚未启用",
+    statusMessage: enabled
+      ? "微信没有提供所需的 WiFi 接口，请联系管理员。"
+      : "请联系管理员启用自动连接。",
     statusTone: "danger",
     initialized: false,
   };
@@ -93,6 +102,8 @@ function failureState(error: NormalizedWifiError): Partial<ConnectViewState> {
 
 export class ConnectController {
   private state: ConnectViewState;
+  private readonly analytics: AnalyticsService;
+  private copying = false;
   private sceneToken: string | null = null;
   private connectConfig: PublicConnectConfig | null = null;
   private disposed = false;
@@ -101,6 +112,11 @@ export class ConnectController {
   private adFailureReported = false;
 
   constructor(private readonly options: ConnectControllerOptions) {
+    this.analytics = new AnalyticsService(
+      options.api,
+      options.enableAnalytics ?? true,
+      options.visitorId ?? (() => undefined),
+    );
     this.state = {
       ...INITIAL_STATE,
       brandName: options.brandName?.trim() || INITIAL_STATE.brandName,
@@ -113,7 +129,6 @@ export class ConnectController {
   }
 
   async load(rawScene: unknown): Promise<void> {
-    if (this.disposed) return;
     const loadId = ++this.operationId;
     this.sceneToken = null;
     this.connectConfig = null;
@@ -123,15 +138,28 @@ export class ConnectController {
       ...INITIAL_STATE,
       brandName: this.state.brandName,
     });
+    if (rawScene === undefined || rawScene === null || rawScene === "") {
+      this.patch({
+        phase: "idle",
+        configLoading: false,
+        storeName: this.state.brandName,
+        buttonLabel: "请扫描门店 WiFi 贴",
+        statusTitle: "欢迎使用免费 WiFi",
+        statusMessage: "使用微信扫一扫，扫描门店张贴的小程序码。",
+        statusTone: "neutral",
+      });
+      return;
+    }
     const sceneToken = parseSceneToken(rawScene);
     if (sceneToken === null) {
       this.patch({
-        phase: "failed",
+        phase: "invalid",
         configLoading: false,
+        storeName: this.state.brandName,
         buttonLabel: "二维码无效",
         buttonDisabled: true,
         statusTitle: "无法识别此二维码",
-        statusMessage: "请扫描用户最新的小程序码。",
+        statusMessage: "请扫描门店最新的小程序码。",
         statusTone: "danger",
       });
       return;
@@ -144,9 +172,17 @@ export class ConnectController {
         return;
       }
 
+      const credential = await this.options.api.getWifiCredential(sceneToken);
+      if (!this.isCurrent(loadId)) return;
+      if (credential.wifiId !== config.wifi.id || credential.storeId !== config.store.id)
+        throw new PublicApiError("INVALID_CODE");
       this.connectConfig = config;
       const adUnitId = this.options.adUnitId?.trim() || config.ad.unitId?.trim() || "";
-      const adEligible = config.ad.enabled && adUnitId.length > 0;
+      const adEligible = new AdService(this.options.enableAds ?? false).canDisplay(
+        "banner",
+        config.ad.enabled,
+        adUnitId,
+      );
       const displayName = config.store.shortName?.trim() || config.store.name;
       const common: Partial<ConnectViewState> = {
         phase: "waiting",
@@ -154,11 +190,12 @@ export class ConnectController {
         hasConfig: true,
         storeName: displayName,
         logoUrl: config.store.logoUrl,
-        ssid: config.wifi.ssid,
+        ssid: credential.ssid,
+        password: credential.password,
         buttonLabel: "一键连接 Wi-Fi",
         buttonDisabled: false,
         statusTitle: "未连接",
-        statusMessage: "点击上方按钮连接用户网络",
+        statusMessage: "点击上方按钮连接门店网络",
         statusTone: "neutral",
         adEligible,
         adCollapsed: !adEligible,
@@ -168,70 +205,73 @@ export class ConnectController {
       this.patch(
         config.compatibility.legacyWifiApiEnabled && this.options.wifi.isAvailable()
           ? common
-          : { ...common, ...unsupportedState() },
+          : { ...common, ...unsupportedState(config.compatibility.legacyWifiApiEnabled) },
       );
       this.report("page_view");
-    } catch {
+      this.report("scan");
+    } catch (error) {
       if (!this.isCurrent(loadId)) {
         return;
       }
+      this.connectConfig = null;
       this.patch({
-        phase: "failed",
-        configLoading: false,
-        hasConfig: false,
-        buttonLabel: "暂时无法连接",
-        buttonDisabled: true,
-        statusTitle: "用户网络暂不可用",
-        statusMessage: "请稍后重新扫码，或联系管理员。",
-        statusTone: "danger",
+        ...lookupFailure(error),
+        storeName: this.state.brandName,
+        password: "",
+        ssid: "—",
       });
     }
   }
 
   async connect(): Promise<void> {
+    if (!this.connectConfig && this.sceneToken && !this.state.buttonDisabled)
+      return this.load(this.sceneToken);
     const config = this.connectConfig;
-    if (this.disposed || config === null || this.sceneToken === null || this.state.buttonDisabled) {
+    if (
+      this.disposed ||
+      config === null ||
+      this.sceneToken === null ||
+      this.state.phase === "loading" ||
+      this.copying ||
+      this.state.phase === "success" ||
+      this.state.phase === "initializing_wifi" ||
+      this.state.phase === "connecting"
+    ) {
       return;
     }
 
     if (!config.compatibility.legacyWifiApiEnabled || !this.options.wifi.isAvailable()) {
-      this.patch(unsupportedState());
+      this.patch(unsupportedState(config.compatibility.legacyWifiApiEnabled));
       return;
     }
 
     const connectId = ++this.operationId;
-    const sceneToken = this.sceneToken;
-    this.patch({
-      ...stageState("initializing_wifi"),
-      statusTitle: "正在获取连接信息",
-    });
     this.report("connect_click");
-    let credential: WifiConnectionSettings;
+    this.patch({
+      phase: "loading",
+      buttonDisabled: true,
+      buttonLabel: "准备连接…",
+      statusTitle: "准备连接",
+      statusMessage: "正在获取当前网络",
+      statusTone: "progress",
+    });
+    let result;
     try {
-      credential = await this.options.api.getCredential(sceneToken);
-    } catch {
+      const credential = await this.options.api.getWifiCredential(this.sceneToken);
       if (!this.isCurrent(connectId)) return;
-      const message = "请重新扫码或联系管理员确认用户网络。";
-      this.patch({
-        phase: "failed",
-        buttonDisabled: false,
-        buttonLabel: "重新连接",
-        statusTitle: "暂时无法获取连接信息",
-        statusMessage: message,
-        statusTone: "danger",
-      });
-      this.report("connect_failure", "credential_unavailable", message);
-      return;
-    }
-    if (!this.isCurrent(connectId)) return;
-    this.patch({ ssid: credential.ssid });
-    let result: WifiConnectResult;
-    try {
+      if (credential.wifiId !== config.wifi.id || credential.storeId !== config.store.id)
+        throw new PublicApiError("INVALID_CODE");
+      this.patch({ ssid: credential.ssid, password: credential.password });
       result = await this.options.wifi.connect(credential, (stage) => {
         if (this.isCurrent(connectId)) this.patch(stageState(stage));
       });
     } catch (error) {
-      result = { ok: false, error: normalizeWifiError(error) };
+      if (error instanceof PublicApiError && this.isCurrent(connectId)) {
+        this.connectConfig = null;
+        this.patch({ ...lookupFailure(error), password: "", ssid: "—" });
+        return;
+      }
+      result = { ok: false as const, error: getInternalWifiError("unknown") };
     }
 
     if (!this.isCurrent(connectId)) {
@@ -244,7 +284,7 @@ export class ConnectController {
         buttonLabel: "已连接 Wi-Fi",
         buttonDisabled: true,
         statusTitle: "连接成功",
-        statusMessage: "您现在可以使用此网络",
+        statusMessage: "您现在可以使用门店网络",
         statusTone: "success",
         initialized: true,
         troubleshootingExpanded: false,
@@ -253,8 +293,52 @@ export class ConnectController {
       return;
     }
 
-    this.patch(failureState(result.error));
+    this.patch({ ...failureState(result.error), troubleshootingExpanded: true });
     this.report("connect_failure", String(result.error.code), result.error.message);
+  }
+
+  async copyPassword(): Promise<void> {
+    if (
+      this.disposed ||
+      this.copying ||
+      !this.sceneToken ||
+      !this.connectConfig ||
+      ["loading", "initializing_wifi", "connecting"].includes(this.state.phase)
+    )
+      return;
+    const copyId = this.operationId;
+    const config = this.connectConfig;
+    this.copying = true;
+    try {
+      const credential = await this.options.api.getWifiCredential(this.sceneToken);
+      if (!this.isCurrent(copyId)) return;
+      if (credential.wifiId !== config.wifi.id || credential.storeId !== config.store.id)
+        throw new PublicApiError("INVALID_CODE");
+      if (!this.options.copyToClipboard) throw new Error("Clipboard unavailable");
+      await this.options.copyToClipboard(credential.password);
+      if (!this.isCurrent(copyId)) return;
+      this.patch({
+        phase: "manual",
+        ssid: credential.ssid,
+        statusTitle: "密码已复制",
+        statusMessage: `请打开手机系统 Wi-Fi 设置，选择 ${credential.ssid} 并粘贴密码。`,
+        statusTone: "neutral",
+        troubleshootingExpanded: true,
+      });
+      this.report("password_copy");
+    } catch (error) {
+      if (error instanceof PublicApiError && this.isCurrent(copyId)) {
+        this.connectConfig = null;
+        this.patch({ ...lookupFailure(error), password: "", ssid: "—" });
+      } else if (this.isCurrent(copyId))
+        this.patch({
+          statusTitle: "暂时无法复制密码",
+          statusMessage: "请重试，或联系店员获取当前密码。",
+          statusTone: "danger",
+        });
+    } finally {
+      this.copying = false;
+    }
   }
 
   retry(): Promise<void> {
@@ -302,10 +386,11 @@ export class ConnectController {
     if (this.disposed) {
       return;
     }
+    this.patch({ password: "", ssid: "—", hasConfig: false });
+    this.connectConfig = null;
+    this.sceneToken = null;
     this.disposed = true;
     this.operationId += 1;
-    this.sceneToken = null;
-    this.connectConfig = null;
     this.options.wifi.dispose();
     this.options.api.dispose();
   }
@@ -336,15 +421,11 @@ export class ConnectController {
       eventType === "connect_failure"
         ? { errorCode: errorCode ?? null, errorMessage: errorMessage ?? null }
         : {};
-    void this.options.api
-      .reportEvent({
-        sceneToken,
-        eventType,
-        platform: this.options.platform,
-        ...errorFields,
-      })
-      .catch(() => {
-        // Anonymous telemetry is intentionally isolated from the Wi-Fi flow.
-      });
+    this.analytics.report({
+      sceneToken,
+      eventType,
+      platform: this.options.platform,
+      ...errorFields,
+    });
   }
 }

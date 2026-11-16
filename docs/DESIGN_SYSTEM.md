@@ -27,8 +27,8 @@ The generated concepts in `docs/design-concepts/` are the implementation referen
 
 ## Copy lock
 
-- Admin navigation: `仪表盘`, `用户管理`, `二维码`, `操作日志`, `系统设置`.
-- Dashboard: `用户总数`, `启用二维码`, `今日扫码量`, `今日连接成功`, `今日成功率`, `近 7 天连接趋势`, `连接漏斗`, `近期用户`.
+- Admin navigation: `仪表盘`, `门店管理`, `二维码`, `操作日志`, `系统设置`.
+- Dashboard: `门店总数`, `启用二维码`, `今日扫码量`, `今日连接成功`, `今日成功率`, `近 7 天连接趋势`, `连接漏斗`, `近期门店`.
 - Mini-program primary copy: `一键连接 Wi-Fi`, `重新连接`, `查看手动解决方式`, `本服务由轻连 WiFi 提供`.
 
 ## Concept files

@@ -1,5 +1,4 @@
 import * as React from "react";
-import { useAuth } from "@/auth/auth-context";
 import Download from "lucide-react/dist/esm/icons/download";
 import Eye from "lucide-react/dist/esm/icons/eye";
 import QrCode from "lucide-react/dist/esm/icons/qr-code";
@@ -48,37 +47,19 @@ interface QrRow {
   qrCode: QrCodeResponse | null;
 }
 
-export async function loadQrRows(search: string): Promise<QrRow[]> {
-  const rows: QrRow[] = [];
-  let page = 1;
-  let totalPages: number;
-  do {
-    const stores = await api.listStores({ page, pageSize: 100, search, status: "all" });
-    const qrCodes = await Promise.all(
-      stores.items.map((store) =>
-        store.qrCode !== undefined ? Promise.resolve(store.qrCode) : api.getQrCode(store.id),
-      ),
-    );
-    rows.push(...stores.items.map((store, index) => ({ store, qrCode: qrCodes[index] ?? null })));
-    totalPages = stores.totalPages;
-    page += 1;
-  } while (page <= totalPages);
-  return rows;
+async function loadQrRows(search: string): Promise<QrRow[]> {
+  const stores = await api.listStores({ page: 1, pageSize: 100, search, status: "all" });
+  const qrCodes = await Promise.all(stores.items.map((store) => api.getQrCode(store.id)));
+  return stores.items.map((store, index) => ({ store, qrCode: qrCodes[index] ?? null }));
 }
 
 export default function QrCodesPage(): React.JSX.Element {
-  const { admin } = useAuth();
-  const isAdmin = admin?.role === "admin";
   const [searchInput, setSearchInput] = React.useState("");
   const [search, setSearch] = React.useState("");
   const [status, setStatus] = React.useState<QrCodeStatus | "all" | "missing">("all");
   const [overrides, setOverrides] = React.useState<Record<string, QrCodeResponse>>({});
   const loader = React.useCallback(() => loadQrRows(search), [search]);
   const { resource, reload } = useAsyncResource(loader);
-
-  React.useEffect(() => {
-    if (resource.status === "success") setOverrides({});
-  }, [resource]);
 
   const rows = React.useMemo(() => {
     if (resource.status !== "success") return [];
@@ -95,12 +76,12 @@ export default function QrCodesPage(): React.JSX.Element {
     <div className="flex flex-col gap-6">
       <PageHeader
         title="二维码"
-        description="生成、预览和下载用户小程序码。二维码不包含 Wi-Fi 密码。"
+        description="生成、预览、下载和停用门店小程序码。二维码不包含 Wi-Fi 密码。"
       />
       <Card>
         <CardHeader className="flex-col gap-4 lg:flex-row lg:items-center">
           <div className="flex flex-col gap-1.5">
-            <CardTitle>用户二维码</CardTitle>
+            <CardTitle>门店二维码</CardTitle>
             <CardDescription>本地占位码会明确标记，不能作为正式微信小程序码使用。</CardDescription>
           </div>
           <div className="flex w-full flex-col gap-3 sm:flex-row lg:w-auto">
@@ -113,13 +94,13 @@ export default function QrCodesPage(): React.JSX.Element {
             >
               <Field className="min-w-0 flex-1">
                 <FieldLabel htmlFor="qr-search" className="sr-only">
-                  搜索用户
+                  搜索门店
                 </FieldLabel>
                 <Input
                   id="qr-search"
                   value={searchInput}
                   onChange={(event) => setSearchInput(event.target.value)}
-                  placeholder="搜索用户"
+                  placeholder="搜索门店"
                 />
               </Field>
               <Button type="submit" variant="outline" size="icon" aria-label="搜索">
@@ -151,7 +132,7 @@ export default function QrCodesPage(): React.JSX.Element {
           {resource.status === "success" && rows.length === 0 ? (
             <ResourceEmpty
               title="暂无二维码记录"
-              description="调整筛选，或在用户编辑页完成配置后生成二维码。"
+              description="调整筛选，或在门店编辑页完成配置后生成二维码。"
             />
           ) : null}
           {resource.status === "success" && rows.length > 0 ? (
@@ -159,8 +140,7 @@ export default function QrCodesPage(): React.JSX.Element {
               <TableHeader>
                 <TableRow>
                   <TableHead>预览</TableHead>
-                  <TableHead>用户</TableHead>
-                  {isAdmin ? <TableHead>二维码创建账号</TableHead> : null}
+                  <TableHead>门店</TableHead>
                   <TableHead>状态</TableHead>
                   <TableHead>提供方</TableHead>
                   <TableHead>生成时间</TableHead>
@@ -191,11 +171,6 @@ export default function QrCodesPage(): React.JSX.Element {
                         </span>
                       </div>
                     </TableCell>
-                    {isAdmin ? (
-                      <TableCell>
-                        {qrCode ? (qrCode.createdByUsername ?? "历史记录，未记录") : "—"}
-                      </TableCell>
-                    ) : null}
                     <TableCell>
                       <StatusBadge status={qrCode?.status ?? null} />
                     </TableCell>

@@ -78,7 +78,6 @@ services:
       API_HOST: 0.0.0.0
       API_PORT: "3100"
       TRUST_PROXY_HOPS: "1"
-      TRUST_PROXY_ADDRESSES: "172.30.250.2"
       ADMIN_WEB_ORIGIN: https://${ADMIN_DOMAIN:?ADMIN_DOMAIN is required}
       COOKIE_SECURE: "true"
       DATABASE_URL: postgresql://${POSTGRES_APP_USER:?POSTGRES_APP_USER is required}:${POSTGRES_APP_PASSWORD:?POSTGRES_APP_PASSWORD is required}@postgres:5432/${POSTGRES_DB:?POSTGRES_DB is required}
@@ -95,6 +94,8 @@ services:
       MINIPROGRAM_ENABLE_LEGACY_WIFI_API: ${MINIPROGRAM_ENABLE_LEGACY_WIFI_API:-false}
       MINIPROGRAM_AD_UNIT_ID: ${MINIPROGRAM_AD_UNIT_ID:-}
       MINIPROGRAM_BRAND_NAME: ${MINIPROGRAM_BRAND_NAME:-轻连 WiFi}
+      ENABLE_ADS: ${ENABLE_ADS:-false}
+      ENABLE_ANALYTICS: ${ENABLE_ANALYTICS:-true}
     volumes:
       - qr_data:/app/storage/qrcodes
     tmpfs:
@@ -133,7 +134,6 @@ services:
     read_only: true
     tmpfs:
       - /tmp:size=16m,mode=1777
-      - /var/cache/nginx:size=16m,uid=101,gid=101,mode=0700
     networks:
       - edge
     healthcheck:
@@ -165,8 +165,7 @@ services:
       admin:
         condition: service_healthy
     networks:
-      edge:
-        ipv4_address: 172.30.250.2
+      - edge
     logging: *default-logging
     <<: *service-security
 
@@ -194,10 +193,6 @@ services:
 
 networks:
   edge:
-    ipam:
-      config:
-        - subnet: 172.30.250.0/28
-          ip_range: 172.30.250.8/29
   backend:
     internal: true
 

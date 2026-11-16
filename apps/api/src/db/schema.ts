@@ -1,8 +1,9 @@
-import type { AdminRole, WifiSecurityType } from "@scan-wifi/shared-types";
+import type { WifiSecurityType } from "@scan-wifi/shared-types";
 import { sql } from "drizzle-orm";
 import {
   boolean,
   check,
+  foreignKey,
   index,
   integer,
   jsonb,
@@ -20,6 +21,8 @@ export const wifiStatusEnum = pgEnum("wifi_status", ["active", "disabled"]);
 export const qrCodeStatusEnum = pgEnum("qr_code_status", ["active", "disabled"]);
 export const connectionEventTypeEnum = pgEnum("connection_event_type", [
   "page_view",
+  "scan",
+  "password_copy",
   "ad_load_success",
   "ad_load_failure",
   "connect_click",
@@ -39,7 +42,6 @@ export const admins = pgTable(
     id: uuid("id").primaryKey().defaultRandom(),
     username: text("username").notNull(),
     passwordHash: text("password_hash").notNull(),
-    role: text("role").$type<AdminRole>().notNull().default("admin"),
     status: adminStatusEnum("status").notNull().default("active"),
     createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
@@ -48,7 +50,6 @@ export const admins = pgTable(
   (table) => [
     uniqueIndex("admins_username_lower_uidx").on(sql`lower(${table.username})`),
     index("admins_status_idx").on(table.status),
-    check("admins_role_check", sql`${table.role} in ('admin', 'operator')`),
   ],
 );
 
@@ -71,27 +72,57 @@ export const adminSessions = pgTable(
   ],
 );
 
+export const DEFAULT_MERCHANT_ID = "11111111-1111-4111-8111-111111111111";
+
+export const merchants = pgTable("merchants", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  openIdHash: text("openid_hash").unique(),
+  name: text("name").notNull(),
+  contact: text("contact"),
+  status: storeStatusEnum("status").notNull().default("active"),
+  createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
+});
+
+export const merchantSessions = pgTable(
+  "merchant_sessions",
+  {
+    tokenHash: text("token_hash").primaryKey(),
+    merchantId: uuid("merchant_id")
+      .notNull()
+      .references(() => merchants.id, { onDelete: "cascade" }),
+    expiresAt: timestamp("expires_at", { withTimezone: true, mode: "date" }).notNull(),
+  },
+  (table) => [
+    index("merchant_sessions_expiry_idx").on(table.expiresAt),
+    index("merchant_sessions_owner_idx").on(table.merchantId),
+  ],
+);
+
 export const stores = pgTable(
   "stores",
   {
     id: uuid("id").primaryKey().defaultRandom(),
-    createdById: uuid("created_by_id").references(() => admins.id),
-    ownerId: uuid("owner_id").references(() => admins.id),
+    merchantId: uuid("merchant_id")
+      .notNull()
+      .default(DEFAULT_MERCHANT_ID)
+      .references(() => merchants.id),
     name: text("name").notNull(),
     shortName: text("short_name"),
     logoUrl: text("logo_url"),
     address: text("address"),
     contactName: text("contact_name"),
     contactPhone: text("contact_phone"),
+    notes: text("notes"),
     status: storeStatusEnum("status").notNull().default("active"),
-    adEnabled: boolean("ad_enabled").notNull().default(true),
+    adEnabled: boolean("ad_enabled").notNull().default(false),
     createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
   },
   (table) => [
+    index("stores_merchant_id_idx").on(table.merchantId),
     index("stores_status_created_at_idx").on(table.status, table.createdAt.desc()),
     index("stores_created_at_idx").on(table.createdAt.desc()),
-    index("stores_owner_id_idx").on(table.ownerId),
   ],
 );
 
@@ -103,6 +134,11 @@ export const wifiConfigs = pgTable(
       .notNull()
       .references(() => stores.id, { onDelete: "cascade" }),
     ssid: text("ssid").notNull(),
+    shortId: text("short_id")
+      .notNull()
+      .default(sql`replace(gen_random_uuid()::text, '-', '')`),
+    spotName: text("spot_name").notNull().default(""),
+    deletedAt: timestamp("deleted_at", { withTimezone: true, mode: "date" }),
     encryptedPassword: text("encrypted_password").notNull(),
     passwordIv: text("password_iv").notNull(),
     passwordAuthTag: text("password_auth_tag").notNull(),
@@ -114,7 +150,9 @@ export const wifiConfigs = pgTable(
     updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
   },
   (table) => [
-    uniqueIndex("wifi_configs_store_id_uidx").on(table.storeId),
+    uniqueIndex("wifi_configs_short_id_uidx").on(table.shortId),
+    index("wifi_configs_store_id_idx").on(table.storeId),
+    uniqueIndex("wifi_configs_store_id_id_uidx").on(table.storeId, table.id),
     index("wifi_configs_status_idx").on(table.status),
     check("wifi_configs_version_check", sql`${table.version} > 0`),
     check(
@@ -131,6 +169,7 @@ export const qrCodes = pgTable(
     storeId: uuid("store_id")
       .notNull()
       .references(() => stores.id, { onDelete: "cascade" }),
+    wifiId: uuid("wifi_id"),
     sceneToken: text("scene_token").notNull(),
     imageUrl: text("image_url").notNull(),
     provider: text("provider").notNull(),
@@ -147,9 +186,16 @@ export const qrCodes = pgTable(
       table.status,
       table.generatedAt.desc(),
     ),
-    uniqueIndex("qr_codes_one_active_per_store_uidx")
-      .on(table.storeId)
+    foreignKey({
+      columns: [table.storeId, table.wifiId],
+      foreignColumns: [wifiConfigs.storeId, wifiConfigs.id],
+    }),
+    uniqueIndex("qr_codes_one_active_per_wifi_uidx")
+      .on(table.wifiId)
       .where(sql`${table.status} = 'active'`),
+    uniqueIndex("qr_codes_legacy_active_per_store_uidx")
+      .on(table.storeId)
+      .where(sql`${table.status} = 'active' and ${table.wifiId} is null`),
     check("qr_codes_scene_token_check", sql`${table.sceneToken} ~ '^[a-f0-9]{32}$'`),
     check("qr_codes_provider_check", sql`${table.provider} in ('wechat', 'local-placeholder')`),
   ],
@@ -163,6 +209,8 @@ export const connectionEvents = pgTable(
       .notNull()
       .references(() => stores.id, { onDelete: "cascade" }),
     qrCodeId: uuid("qr_code_id").references(() => qrCodes.id, { onDelete: "set null" }),
+    wifiId: uuid("wifi_id"),
+    visitorHash: text("visitor_hash"),
     eventType: connectionEventTypeEnum("event_type").notNull(),
     platform: clientPlatformEnum("platform").notNull().default("unknown"),
     errorCode: text("error_code"),
@@ -172,6 +220,11 @@ export const connectionEvents = pgTable(
       .defaultNow(),
   },
   (table) => [
+    foreignKey({
+      columns: [table.storeId, table.wifiId],
+      foreignColumns: [wifiConfigs.storeId, wifiConfigs.id],
+    }),
+    index("connection_events_wifi_date_idx").on(table.wifiId, table.occurredAt),
     index("connection_events_store_occurred_idx").on(table.storeId, table.occurredAt.desc()),
     index("connection_events_type_occurred_idx").on(table.eventType, table.occurredAt.desc()),
     index("connection_events_qr_code_id_idx").on(table.qrCodeId),

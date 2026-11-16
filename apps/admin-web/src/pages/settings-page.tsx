@@ -62,7 +62,7 @@ export default function SettingsPage(): React.JSX.Element {
           <CardHeader>
             <div className="flex flex-col gap-1.5">
               <CardTitle>广告管理</CardTitle>
-              <CardDescription>全局关闭时，所有用户都不会加载原生模板广告。</CardDescription>
+              <CardDescription>全局关闭时，所有门店都不会加载 Banner 广告。</CardDescription>
             </div>
             <Megaphone className="size-5 text-primary" aria-hidden="true" />
           </CardHeader>
@@ -71,7 +71,7 @@ export default function SettingsPage(): React.JSX.Element {
               <div className="flex flex-col gap-1.5">
                 <FieldTitle id="global-ad-label">全局广告开关</FieldTitle>
                 <FieldDescription>
-                  用户开关与全局开关同时开启时，顾客页才异步加载广告。
+                  广告能力和广告位配置就绪、门店与全局开关同时开启后，顾客页才加载广告。
                 </FieldDescription>
               </div>
               <Switch

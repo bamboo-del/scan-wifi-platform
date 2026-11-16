@@ -2,9 +2,9 @@ import type { WechatMiniProgramApi, WechatRequestTask } from "./wechat-types";
 import type {
   EventPlatform,
   PublicApi,
+  PublicWifiCredential,
   PublicConnectConfig,
   PublicEventInput,
-  WifiConnectionSettings,
 } from "../core/types";
 
 export class PublicApiError extends Error {
@@ -37,6 +37,8 @@ export function decodePublicConnectConfig(value: unknown): PublicConnectConfig {
     !isRecord(wifi) ||
     !isRecord(ad) ||
     !isRecord(compatibility) ||
+    !isNonEmptyString(store.id) ||
+    !isNonEmptyString(wifi.id) ||
     !isNonEmptyString(store.name) ||
     !isNullableString(store.shortName) ||
     !isNullableString(store.logoUrl) ||
@@ -52,11 +54,13 @@ export function decodePublicConnectConfig(value: unknown): PublicConnectConfig {
 
   return {
     store: {
+      id: store.id,
       name: store.name,
       shortName: store.shortName,
       logoUrl: store.logoUrl,
     },
     wifi: {
+      id: wifi.id,
       ssid: wifi.ssid,
       bssid: wifi.bssid,
       securityType: wifi.securityType,
@@ -68,23 +72,6 @@ export function decodePublicConnectConfig(value: unknown): PublicConnectConfig {
     compatibility: {
       legacyWifiApiEnabled: compatibility.legacyWifiApiEnabled,
     },
-  };
-}
-
-export function decodePublicCredential(value: unknown): WifiConnectionSettings {
-  if (
-    !isRecord(value) ||
-    !isRecord(value.wifi) ||
-    !isNonEmptyString(value.wifi.ssid) ||
-    typeof value.wifi.password !== "string" ||
-    !isNullableString(value.wifi.bssid)
-  ) {
-    throw new PublicApiError("INVALID_RESPONSE");
-  }
-  return {
-    ssid: value.wifi.ssid,
-    password: value.wifi.password,
-    bssid: value.wifi.bssid,
   };
 }
 
@@ -133,7 +120,7 @@ export function getEventPlatform(api: WechatMiniProgramApi): EventPlatform {
 
 export class WechatPublicApiClient implements PublicApi {
   private readonly apiBaseUrl: string;
-  private readonly activeTasks = new Map<WechatRequestTask, () => void>();
+  private readonly activeTasks = new Set<WechatRequestTask>();
   private disposed = false;
 
   constructor(
@@ -146,17 +133,33 @@ export class WechatPublicApiClient implements PublicApi {
   }
 
   async getConnectConfig(sceneToken: string): Promise<PublicConnectConfig> {
-    const data = await this.request("GET", `/api/public/connect/${encodeURIComponent(sceneToken)}`);
+    const data = await this.request("POST", "/api/public/connect", { sceneToken });
     return decodePublicConnectConfig(data);
+  }
+
+  async getWifiCredential(sceneToken: string): Promise<PublicWifiCredential> {
+    const value = await this.request("POST", "/api/public/credential", { sceneToken });
+    if (
+      !isRecord(value) ||
+      !isNonEmptyString(value.storeId) ||
+      !isNonEmptyString(value.wifiId) ||
+      !isNonEmptyString(value.ssid) ||
+      typeof value.password !== "string" ||
+      !isNullableString(value.bssid)
+    ) {
+      throw new PublicApiError("INVALID_RESPONSE");
+    }
+    return {
+      storeId: value.storeId,
+      wifiId: value.wifiId,
+      ssid: value.ssid,
+      password: value.password,
+      bssid: value.bssid,
+    };
   }
 
   async reportEvent(event: PublicEventInput): Promise<void> {
     await this.request("POST", "/api/public/events", event, 202);
-  }
-
-  async getCredential(sceneToken: string): Promise<WifiConnectionSettings> {
-    const data = await this.request("POST", "/api/public/credential", { sceneToken });
-    return decodePublicCredential(data);
   }
 
   dispose(): void {
@@ -164,8 +167,7 @@ export class WechatPublicApiClient implements PublicApi {
       return;
     }
     this.disposed = true;
-    for (const [task, cancel] of this.activeTasks) {
-      cancel();
+    for (const task of this.activeTasks) {
       try {
         task.abort();
       } catch {
@@ -226,9 +228,7 @@ export class WechatPublicApiClient implements PublicApi {
           },
         });
         if (!settled) {
-          this.activeTasks.set(task, () => {
-            finish(() => reject(new PublicApiError("CLIENT_DISPOSED")));
-          });
+          this.activeTasks.add(task);
         }
       } catch {
         finish(() => reject(new PublicApiError("REQUEST_SETUP_FAILED")));

@@ -26,15 +26,22 @@
     {
       "idx": 3,
       "version": "7",
-      "when": 1791763200000,
-      "tag": "0003_operator_ownership",
+      "when": 1785341235066,
+      "tag": "0003_store_ads_default_disabled",
       "breakpoints": true
     },
     {
       "idx": 4,
       "version": "7",
-      "when": 1791820800000,
-      "tag": "0004_remove_user_notes",
+      "when": 1789376492664,
+      "tag": "0004_magenta_sue_storm",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1790254565308,
+      "tag": "0005_keen_sir_ram",
       "breakpoints": true
     }
   ]

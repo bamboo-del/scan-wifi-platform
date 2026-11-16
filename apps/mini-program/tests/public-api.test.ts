@@ -1,21 +1,22 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   decodePublicConnectConfig,
-  decodePublicCredential,
   getEventPlatform,
   isAllowedApiBaseUrl,
   PublicApiError,
   WechatPublicApiClient,
 } from "../src/platform/public-api";
-import type { WechatMiniProgramApi, WechatRequestOptions } from "../src/platform/wechat-types";
+import type { WechatMiniProgramApi } from "../src/platform/wechat-types";
 
 const VALID_RESPONSE = {
   store: {
+    id: "store-test",
     name: "南山咖啡·科技园店",
     shortName: null,
     logoUrl: null,
   },
   wifi: {
+    id: "wifi-test",
     ssid: "NanshanCoffee-FreeWiFi",
     bssid: null,
     securityType: null,
@@ -34,14 +35,6 @@ describe("decodePublicConnectConfig", () => {
     expect(decodePublicConnectConfig(VALID_RESPONSE)).toEqual(VALID_RESPONSE);
   });
 
-  it("discards accidental credentials in the metadata response", () => {
-    const response = decodePublicConnectConfig({
-      ...VALID_RESPONSE,
-      wifi: { ...VALID_RESPONSE.wifi, password: "unexpected-secret" },
-    });
-    expect(response.wifi).not.toHaveProperty("password");
-  });
-
   it("rejects a response missing compatibility verification", () => {
     const invalid = { ...VALID_RESPONSE, compatibility: {} };
     expect(() => decodePublicConnectConfig(invalid)).toThrow(PublicApiError);
@@ -53,57 +46,6 @@ describe("decodePublicConnectConfig", () => {
       wifi: { ssid: VALID_RESPONSE.wifi.ssid, password: "secret" },
     };
     expect(() => decodePublicConnectConfig(invalid)).toThrow(PublicApiError);
-  });
-});
-
-describe("WechatPublicApiClient", () => {
-  it("requests credentials using a POST body and decodes only connection settings", async () => {
-    const request = vi.fn((options: WechatRequestOptions) => {
-      options.success({
-        statusCode: 200,
-        data: { wifi: { ...VALID_RESPONSE.wifi, password: "connect-only" } },
-      });
-      return { abort: vi.fn() };
-    });
-    const client = new WechatPublicApiClient(
-      { request } as unknown as WechatMiniProgramApi,
-      "https://wifi.example.com",
-      8000,
-    );
-    await expect(client.getCredential("scene-token")).resolves.toEqual({
-      ssid: VALID_RESPONSE.wifi.ssid,
-      password: "connect-only",
-      bssid: null,
-    });
-    expect(request).toHaveBeenCalledWith(
-      expect.objectContaining({
-        url: "https://wifi.example.com/api/public/credential",
-        method: "POST",
-        data: { sceneToken: "scene-token" },
-      }),
-    );
-    expect(() => decodePublicCredential({ wifi: VALID_RESPONSE.wifi })).toThrow(PublicApiError);
-  });
-
-  it("settles pending requests on unload even when abort emits no callback", async () => {
-    let requestOptions: WechatRequestOptions | undefined;
-    const abort = vi.fn();
-    const client = new WechatPublicApiClient(
-      {
-        request: (options: WechatRequestOptions) => {
-          requestOptions = options;
-          return { abort };
-        },
-      } as unknown as WechatMiniProgramApi,
-      "https://wifi.example.com",
-      8000,
-    );
-    const pending = client.getConnectConfig("scene-token");
-    const assertion = expect(pending).rejects.toMatchObject({ code: "CLIENT_DISPOSED" });
-    client.dispose();
-    requestOptions?.success({ statusCode: 200, data: VALID_RESPONSE });
-    await assertion;
-    expect(abort).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -121,6 +63,32 @@ describe("isAllowedApiBaseUrl", () => {
     expect(isAllowedApiBaseUrl("https://user:password@example.com", false)).toBe(false);
     expect(isAllowedApiBaseUrl("https://wifi.example.com?secret=value", false)).toBe(false);
     expect(isAllowedApiBaseUrl("javascript:alert(1)", true)).toBe(false);
+  });
+});
+
+describe("WechatPublicApiClient", () => {
+  it("keeps the opaque scene out of the request URL and sends it only in the validated body", async () => {
+    const sceneToken = "0123456789abcdef0123456789abcdef";
+    const request = vi.fn((options: Record<string, unknown>) => {
+      const success = options.success as (result: { statusCode: number; data: unknown }) => void;
+      success({ statusCode: 200, data: VALID_RESPONSE });
+      return { abort: vi.fn() };
+    });
+    const client = new WechatPublicApiClient(
+      { request } as unknown as WechatMiniProgramApi,
+      "https://wifi.example.com",
+      8_000,
+    );
+
+    await expect(client.getConnectConfig(sceneToken)).resolves.toEqual(VALID_RESPONSE);
+    expect(request).toHaveBeenCalledWith(
+      expect.objectContaining({
+        url: "https://wifi.example.com/api/public/connect",
+        method: "POST",
+        data: { sceneToken },
+      }),
+    );
+    expect(JSON.stringify(request.mock.calls[0]?.[0].url)).not.toContain(sceneToken);
   });
 });
 

@@ -5,6 +5,8 @@ export const WIFI_SECURITY_TYPES = ["WPA", "WPA2", "WPA3", "WPA2_WPA3", "WEP", "
 export const QR_CODE_STATUSES = ["active", "disabled"] as const;
 export const CONNECTION_EVENT_TYPES = [
   "page_view",
+  "scan",
+  "password_copy",
   "ad_load_success",
   "ad_load_failure",
   "connect_click",
@@ -14,23 +16,29 @@ export const CONNECTION_EVENT_TYPES = [
 export const CLIENT_PLATFORMS = ["ios", "android", "devtools", "unknown"] as const;
 
 export type AdminStatus = (typeof ADMIN_STATUSES)[number];
-export type AdminRole = "admin" | "operator";
-export interface AdminActor {
-  id: string;
-  role: AdminRole;
-}
-export interface AccountSummary extends AdminActor {
-  username: string;
-  status: AdminStatus;
-  createdAt: string;
-  lastLoginAt: string | null;
-}
 export type StoreStatus = (typeof STORE_STATUSES)[number];
 export type WifiStatus = (typeof WIFI_STATUSES)[number];
 export type WifiSecurityType = (typeof WIFI_SECURITY_TYPES)[number];
 export type QrCodeStatus = (typeof QR_CODE_STATUSES)[number];
 export type ConnectionEventType = (typeof CONNECTION_EVENT_TYPES)[number];
 export type ClientPlatform = (typeof CLIENT_PLATFORMS)[number];
+
+/** Merchant view. Credentials and owner identity are never included. */
+export interface WifiSpot {
+  id: string;
+  shortId: string;
+  shopName: string;
+  spotName: string;
+  ssid: string;
+  bssid: string | null;
+  status: "active" | "disabled";
+  qrFileId: string | null;
+  qrProvider: "wechat" | "local-placeholder" | null;
+  qrUpdatedAt: string | null;
+  connectCount: number;
+  createTime: string;
+  updateTime: string;
+}
 
 export interface ErrorEnvelope {
   error: {
@@ -54,32 +62,30 @@ export interface AdminSessionResponse {
   admin: {
     id: string;
     username: string;
-    role: AdminRole;
   };
   expiresAt: string;
 }
 
 export interface StoreSummary {
-  createdByUsername?: string | null;
   id: string;
-  createdById: string | null;
-  ownerId: string | null;
+  merchantId: string;
   name: string;
   shortName: string | null;
   logoUrl: string | null;
   address: string | null;
   contactName: string | null;
   contactPhone: string | null;
+  notes: string | null;
   status: StoreStatus;
   adEnabled: boolean;
   hasWifi: boolean;
   qrCodeStatus: QrCodeStatus | null;
-  qrCode?: QrCodeResponse | null;
   createdAt: string;
   updatedAt: string;
 }
 
 export interface WifiStatusResponse {
+  id: string | null;
   configured: boolean;
   ssid: string | null;
   passwordMasked: string | null;
@@ -91,9 +97,9 @@ export interface WifiStatusResponse {
 }
 
 export interface QrCodeResponse {
-  createdByUsername?: string | null;
   id: string;
   storeId: string;
+  wifiId: string | null;
   sceneToken: string;
   status: QrCodeStatus;
   generatedAt: string;
@@ -134,6 +140,9 @@ export interface DashboardResponse {
 
 export interface StatisticsTotals {
   pageViews: number;
+  uniqueVisitors: number;
+  scans: number;
+  passwordCopies: number;
   adLoadSuccesses: number;
   adLoadFailures: number;
   connectClicks: number;
@@ -169,11 +178,13 @@ export interface SystemSettingsResponse {
 
 export interface PublicConnectResponse {
   store: {
+    id: string;
     name: string;
     shortName: string | null;
     logoUrl: string | null;
   };
   wifi: {
+    id: string;
     ssid: string;
     bssid: string | null;
     securityType: WifiSecurityType | null;
@@ -187,6 +198,32 @@ export interface PublicConnectResponse {
   };
 }
 
-export interface PublicCredentialResponse {
-  wifi: PublicConnectResponse["wifi"] & { password: string };
+export interface PublicWifiCredential {
+  wifiId: string;
+  storeId: string;
+  ssid: string;
+  password: string;
+  bssid: string | null;
+}
+
+export interface MerchantResponse {
+  id: string;
+  name: string;
+  contact: string | null;
+  status: StoreStatus;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface WifiNetworkResponse extends WifiStatusResponse {
+  qrCode: QrCodeResponse | null;
+}
+
+export interface AnalyticsRow {
+  date: string;
+  merchantId: string;
+  storeId: string;
+  wifiId: string | null;
+  ssid: string | null;
+  totals: StatisticsTotals;
 }

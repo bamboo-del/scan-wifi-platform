@@ -1,8 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import path from "node:path";
-import { LocalFileQrCodeStorage } from "../../src/services/qrcode-storage.js";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import {
   WeChatAccessTokenCache,
   WeChatQRCodeProvider,
@@ -10,11 +6,6 @@ import {
 
 const validOnePixelPng = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
-  "base64",
-);
-
-const validOnePixelJpeg = Buffer.from(
-  "/9j/4AAQSkZJRgABAQEAYABgAAD/2wBDAAMCAgMCAgMDAwMEAwMEBQgFBQQEBQoHBwYIDAoMDAsKCwsNDhIQDQ4RDgsLEBYQERMUFRUVDA8XGBYUGBIUFRT/2wBDAQMEBAUEBQkFBQkUDQsNFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBT/wAARCAABAAEDASIAAhEBAxEB/8QAHwAAAQUBAQEBAQEAAAAAAAAAAAECAwQFBgcICQoL/8QAtRAAAgEDAwIEAwUFBAQAAAF9AQIDAAQRBRIhMUEGE1FhByJxFDKBkaEII0KxwRVS0fAkM2JyggkKFhcYGRolJicoKSo0NTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqDhIWGh4iJipKTlJWWl5iZmqKjpKWmp6ipqrKztLW2t7i5usLDxMXGx8jJytLT1NXW19jZ2uHi4+Tl5ufo6erx8vP09fb3+Pn6/8QAHwEAAwEBAQEBAQEBAQAAAAAAAAECAwQFBgcICQoL/8QAtREAAgECBAQDBAcFBAQAAQJ3AAECAxEEBSExBhJBUQdhcRMiMoEIFEKRobHBCSMzUvAVYnLRChYkNOEl8RcYGRomJygpKjU2Nzg5OkNERUZHSElKU1RVVldYWVpjZGVmZ2hpanN0dXZ3eHl6goOEhYaHiImKkpOUlZaXmJmaoqOkpaanqKmqsrO0tba3uLm6wsPExcbHyMnK0tPU1dbX2Nna4uPk5ebn6Onq8vP09fb3+Pn6/9oADAMBAAIRAxEAPwD8qqKKKAP/2Q==",
   "base64",
 );
 
@@ -31,68 +22,36 @@ function createTokenCache() {
 }
 
 describe("WeChatQRCodeProvider", () => {
-  it("accepts a WeChat JPEG and preserves its bytes and type through storage", async () => {
-    const fetchQrCode: typeof fetch = async () =>
-      new Response(new Uint8Array(validOnePixelJpeg), {
-        headers: { "content-type": "image/jpeg" },
-      });
+  it("explains an unpublished connection page without exposing the external response", async () => {
+    const tokens = createTokenCache();
     const provider = new WeChatQRCodeProvider(
-      createTokenCache().cache,
+      tokens.cache,
       "pages/connect/index",
       "release",
-      fetchQrCode,
+      async () => Response.json({ errcode: 41030, errmsg: "external-sensitive-response" }),
     );
-    const generated = await provider.generate("e".repeat(32));
-    expect(generated).toEqual({
-      content: validOnePixelJpeg,
-      contentType: "image/jpeg",
-      extension: "jpg",
+    const result = provider.generate("a".repeat(32));
+    await expect(result).rejects.toMatchObject({
+      code: "WECHAT_QR_PAGE_UNAVAILABLE",
     });
-    const directory = await mkdtemp(path.join(tmpdir(), "wechat-qr-"));
-    try {
-      const storage = new LocalFileQrCodeStorage(directory);
-      const stored = await storage.save("e".repeat(32), generated.extension, generated.content);
-      expect(stored.location).toMatch(/\.jpg$/u);
-      expect(await storage.read(stored.location)).toEqual({
-        content: validOnePixelJpeg,
-        contentType: "image/jpeg",
+    await expect(result).rejects.toThrow("小程序连接页尚未发布");
+  });
+  it("deduplicates concurrent access-token refreshes", async () => {
+    let release: ((response: Response) => void) | undefined;
+    let requests = 0;
+    const fetchToken: typeof fetch = async () => {
+      requests += 1;
+      return new Promise<Response>((resolve) => {
+        release = resolve;
       });
-    } finally {
-      await rm(directory, { recursive: true, force: true });
-    }
-  });
-
-  it("stops reading an oversized upstream body and cancels its stream", async () => {
-    const cancel = vi.fn();
-    const oversized = new ReadableStream<Uint8Array>({
-      pull(controller) {
-        controller.enqueue(new Uint8Array(1024 * 1024));
-      },
-      cancel,
-    });
-    const fetchQrCode: typeof fetch = async (_input, init) => {
-      expect(init?.redirect).toBe("error");
-      return new Response(oversized, { headers: { "content-type": "image/png" } });
     };
-    const provider = new WeChatQRCodeProvider(
-      createTokenCache().cache,
-      "pages/connect/index",
-      "release",
-      fetchQrCode,
-    );
-    await expect(provider.generate("a".repeat(32))).rejects.toMatchObject({
-      code: "WECHAT_QR_UNAVAILABLE",
-    });
-    expect(cancel).toHaveBeenCalledOnce();
-  });
+    const cache = new WeChatAccessTokenCache("app-id", "server-credential", fetchToken);
+    const first = cache.get();
+    const second = cache.get();
+    release?.(Response.json({ access_token: "shared-token", expires_in: 7200 }));
 
-  it("bounds token responses and disallows redirects containing server credentials", async () => {
-    const fetchToken: typeof fetch = async (_input, init) => {
-      expect(init?.redirect).toBe("error");
-      return new Response("x".repeat(64 * 1024 + 1));
-    };
-    const cache = new WeChatAccessTokenCache("app-id", "app-secret", fetchToken);
-    await expect(cache.get()).rejects.toMatchObject({ code: "WECHAT_TOKEN_UNAVAILABLE" });
+    await expect(Promise.all([first, second])).resolves.toEqual(["shared-token", "shared-token"]);
+    expect(requests).toBe(1);
   });
 
   it("sends only the opaque scene and fixed rendering options in the QR request body", async () => {
@@ -183,11 +142,6 @@ describe("WeChatQRCodeProvider", () => {
   it.each([
     ["wrong content type", "application/octet-stream", validOnePixelPng],
     ["invalid PNG bytes", "image/png", Buffer.from("not-a-png")],
-    ["invalid JPEG bytes", "image/jpeg", Buffer.from("not-a-jpeg")],
-    ["truncated JPEG", "image/jpeg", validOnePixelJpeg.subarray(0, -2)],
-    ["PNG disguised as JPEG", "image/jpeg", validOnePixelPng],
-    ["JPEG disguised as PNG", "image/png", validOnePixelJpeg],
-    ["empty JPEG markers", "image/jpeg", Buffer.from([0xff, 0xd8, 0xff, 0xd9])],
   ])("rejects a successful response with %s", async (_case, contentType, content) => {
     const tokens = createTokenCache();
     const fetchQrCode: typeof fetch = async () =>

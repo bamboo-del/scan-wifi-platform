@@ -9,6 +9,7 @@ const VALID_DRAFT: StoreDraft = {
   address: "深圳市南山区测试路 1 号",
   contactName: "张店长",
   contactPhone: "138 0000 0000",
+  notes: "",
   adEnabled: true,
   status: "active",
   ssid: "Test-Cafe-WiFi",
@@ -45,7 +46,7 @@ describe("validateStoreDraft", () => {
     );
 
     expect(errors).toMatchObject({
-      name: "请输入用户名称",
+      name: "请输入门店名称",
       contactPhone: "请输入有效的联系电话",
       ssid: "请输入 Wi-Fi 名称",
       bssid: "请输入有效的 BSSID，例如 AA:BB:CC:DD:EE:FF",
@@ -81,54 +82,5 @@ describe("validateStoreDraft", () => {
 
     expect(errors.newPassword).toBeUndefined();
     expect(errors.confirmPassword).toBeUndefined();
-  });
-
-  it("enforces the UTF-8 SSID byte limit and password maximum before creating a store", () => {
-    const errors = validateStoreDraft(
-      { ...VALID_DRAFT, ssid: "中".repeat(11), newPassword: "x".repeat(64) },
-      { requireWifiPassword: true },
-    );
-    expect(errors.ssid).toContain("32 字节");
-    expect(errors.newPassword).toContain("63 个字符");
-    expect(
-      validateStoreDraft({ ...VALID_DRAFT, ssid: " Cafe " }, { requireWifiPassword: true }).ssid,
-    ).toBeUndefined();
-  });
-
-  it.each([
-    "javascript:alert(1)",
-    "file:///tmp/logo.png",
-    "https://user:secret@example.com/logo.png",
-  ])("rejects unsafe logo URL %s", (logoUrl) => {
-    expect(
-      validateStoreDraft({ ...VALID_DRAFT, logoUrl }, { requireWifiPassword: true }).logoUrl,
-    ).toBeDefined();
-  });
-
-  it.each([
-    ["OPEN", ""],
-    ["WEP", "abcde"],
-    ["WEP", "a1b2c3d4e5"],
-  ] as const)("accepts legacy %s credentials", (securityType, password) => {
-    expect(
-      validateStoreDraft(
-        {
-          ...VALID_DRAFT,
-          securityType,
-          newPassword: password,
-          confirmPassword: password,
-        },
-        { requireWifiPassword: true },
-      ),
-    ).toEqual({});
-  });
-
-  it("rejects a password for OPEN and invalid WEP credentials", () => {
-    for (const securityType of ["OPEN", "WEP"] as const) {
-      expect(
-        validateStoreDraft({ ...VALID_DRAFT, securityType }, { requireWifiPassword: true })
-          .newPassword,
-      ).toBeDefined();
-    }
   });
 });

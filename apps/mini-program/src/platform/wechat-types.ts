@@ -34,6 +34,10 @@ export interface ConnectWifiOptions extends WifiOperationOptions {
 }
 
 export interface LegacyWifiWxApi {
+  getConnectedWifi?(options: {
+    success: (result: WifiConnectedResult) => void;
+    fail: (error: WechatCallbackResult) => void;
+  }): void;
   startWifi(options: WifiOperationOptions): void;
   connectWifi(options: ConnectWifiOptions): void;
   onWifiConnected(listener: WifiConnectedListener): void;
@@ -64,7 +68,7 @@ export interface WechatRequestSuccessResult {
 
 export interface WechatRequestOptions {
   readonly url: string;
-  readonly method: "GET" | "POST";
+  readonly method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
   readonly data?: unknown;
   readonly header?: Readonly<Record<string, string>>;
   readonly timeout?: number;
@@ -106,6 +110,56 @@ export interface WechatNavigationOptions {
 }
 
 export interface WechatMiniProgramApi extends LegacyWifiWxApi {
+  login(options: { success: (result: { code: string }) => void; fail: () => void }): void;
+  redirectTo(options: WechatNavigationOptions): void;
+  showToast(options: { title: string; icon: "success" | "none" }): void;
+  showModal(options: {
+    title: string;
+    content: string;
+    success: (result: { confirm: boolean }) => void;
+  }): void;
+  downloadFile(options: {
+    url: string;
+    header: Record<string, string>;
+    success: (result: { statusCode: number; tempFilePath: string }) => void;
+    fail: () => void;
+  }): void;
+  saveImageToPhotosAlbum(options: {
+    filePath: string;
+    success: () => void;
+    fail: () => void;
+  }): void;
+  previewImage(options: { urls: string[] }): void;
+  createCanvasContext(
+    canvasId: string,
+    page: object,
+  ): {
+    setFillStyle(color: string): void;
+    fillRect(x: number, y: number, w: number, h: number): void;
+    setTextAlign(align: string): void;
+    setFontSize(size: number): void;
+    fillText(text: string, x: number, y: number): void;
+    drawImage(path: string, x: number, y: number, w: number, h: number): void;
+    draw(reserve: boolean, done: () => void): void;
+  };
+  canvasToTempFilePath(
+    options: {
+      canvasId: string;
+      width: number;
+      height: number;
+      destWidth: number;
+      destHeight: number;
+      fileType: "png";
+      success: (result: { tempFilePath: string }) => void;
+      fail: () => void;
+    },
+    page: object,
+  ): void;
+  getLaunchOptionsSync?(): { query?: Readonly<Record<string, unknown>>; path?: string };
+  getEnterOptionsSync?(): { query?: Readonly<Record<string, unknown>>; path?: string };
+  getStorageSync?(key: string): unknown;
+  setStorageSync?(key: string, value: unknown): void;
+  setClipboardData?(options: { data: string; success?: () => void; fail?: () => void }): void;
   request(options: WechatRequestOptions): WechatRequestTask;
   getSystemInfoSync?: () => WechatSystemInfo;
   getAppBaseInfo?: () => WechatAppBaseInfo;

@@ -1,5 +1,11 @@
 {
-  "pages": ["pages/connect/index"],
+  "pages": [
+    "pages/connect/index",
+    "pages/manage/list",
+    "pages/manage/create",
+    "pages/manage/detail",
+    "pages/success/index"
+  ],
   "window": {
     "navigationBarBackgroundColor": "#ffffff",
     "navigationBarTextStyle": "black",

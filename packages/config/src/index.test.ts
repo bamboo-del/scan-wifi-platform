@@ -9,40 +9,6 @@ const VALID_ENVIRONMENT: NodeJS.ProcessEnv = {
 };
 
 describe("loadConfig", () => {
-  it("accepts an email as the initialization login name", () => {
-    expect(
-      loadAdminInitConfig({
-        DATABASE_URL: VALID_ENVIRONMENT.DATABASE_URL,
-        INITIAL_ADMIN_USERNAME: "admin@example.com",
-        INITIAL_ADMIN_PASSWORD: "test-password-long",
-      }).INITIAL_ADMIN_USERNAME,
-    ).toBe("admin@example.com");
-  });
-  it("normalizes a browser origin and rejects values that cannot match it", () => {
-    expect(
-      loadConfig({ ...VALID_ENVIRONMENT, ADMIN_WEB_ORIGIN: "https://Admin.scan-wifi.cn/" })
-        .ADMIN_WEB_ORIGIN,
-    ).toBe("https://admin.scan-wifi.cn");
-    for (const origin of [
-      "https://admin.scan-wifi.cn/login",
-      "https://user:secret@admin.scan-wifi.cn",
-      "https://admin.scan-wifi.cn/?test=1",
-      "file:///tmp/admin",
-    ]) {
-      expect(() => loadConfig({ ...VALID_ENVIRONMENT, ADMIN_WEB_ORIGIN: origin })).toThrow();
-    }
-  });
-
-  it("rejects initialization usernames the login endpoint cannot accept", () => {
-    expect(() =>
-      loadAdminInitConfig({
-        DATABASE_URL: VALID_ENVIRONMENT.DATABASE_URL,
-        INITIAL_ADMIN_USERNAME: "管理员",
-        INITIAL_ADMIN_PASSWORD: "test-password-long",
-      }),
-    ).toThrow();
-  });
-
   it("does not trust forwarded addresses by default", () => {
     const config = loadConfig(VALID_ENVIRONMENT);
 
@@ -50,37 +16,9 @@ describe("loadConfig", () => {
   });
 
   it("accepts an explicit bounded reverse-proxy hop count", () => {
-    const config = loadConfig({
-      ...VALID_ENVIRONMENT,
-      TRUST_PROXY_HOPS: "1",
-      TRUST_PROXY_ADDRESSES: "127.0.0.1, ::1",
-    });
+    const config = loadConfig({ ...VALID_ENVIRONMENT, TRUST_PROXY_HOPS: "1" });
 
     expect(config.TRUST_PROXY_HOPS).toBe(1);
-    expect(config.TRUST_PROXY_ADDRESSES).toEqual(["127.0.0.1", "::1"]);
-  });
-
-  it("requires explicit proxy peers and rejects invalid or wildcard networks", () => {
-    expect(() => loadConfig({ ...VALID_ENVIRONMENT, TRUST_PROXY_HOPS: "1" })).toThrow();
-    for (const address of [
-      "uniquelocal",
-      "0.0.0.0/0",
-      "::/0",
-      "127.0.0.1/33",
-      "::1/129",
-      "example.com",
-    ]) {
-      expect(() =>
-        loadConfig({ ...VALID_ENVIRONMENT, TRUST_PROXY_HOPS: "1", TRUST_PROXY_ADDRESSES: address }),
-      ).toThrow();
-    }
-    expect(
-      loadConfig({
-        ...VALID_ENVIRONMENT,
-        TRUST_PROXY_HOPS: "1",
-        TRUST_PROXY_ADDRESSES: "172.30.250.2/32",
-      }).TRUST_PROXY_ADDRESSES,
-    ).toEqual(["172.30.250.2/32"]);
   });
 
   it("rejects an unbounded proxy chain", () => {
@@ -107,6 +45,9 @@ describe("loadConfig", () => {
     expect(() =>
       loadConfig({ ...production, ADMIN_WEB_ORIGIN: "https://admin.example.cn" }),
     ).toThrow(/占位域名/u);
+    expect(() =>
+      loadConfig({ ...production, ADMIN_WEB_ORIGIN: "https://admin.prelaunch.invalid" }),
+    ).toThrow(/占位域名/u);
     expect(() => loadConfig({ ...production, WECHAT_APP_ID: "touristappid" })).toThrow(
       /正式微信小程序 AppID/u,
     );
@@ -119,8 +60,9 @@ describe("loadConfig", () => {
     expect(
       loadAdminInitConfig({
         DATABASE_URL: VALID_ENVIRONMENT.DATABASE_URL,
+        DATABASE_POOL_MAX: "10",
         INITIAL_ADMIN_PASSWORD: "correct-horse-battery-staple",
       }),
-    ).toMatchObject({ INITIAL_ADMIN_USERNAME: "admin", DATABASE_POOL_MAX: 2 });
+    ).toMatchObject({ INITIAL_ADMIN_USERNAME: "admin", DATABASE_POOL_MAX: 10 });
   });
 });

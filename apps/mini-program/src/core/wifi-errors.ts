@@ -15,19 +15,19 @@ const DOCUMENTED_ERRORS: Readonly<Record<DocumentedWifiErrorCode, NormalizedWifi
     code: 12001,
     phase: "unsupported",
     title: "当前设备暂不支持",
-    message: "请使用系统 Wi-Fi 设置手动连接用户网络。",
+    message: "请使用系统 Wi-Fi 设置手动连接门店网络。",
   },
   12002: {
     code: 12002,
     phase: "failed",
     title: "Wi-Fi 密码可能不正确",
-    message: "用户 Wi-Fi 密码可能已更新，请联系管理员确认后重新连接。",
+    message: "门店 Wi-Fi 密码可能已更新，请联系店员确认后重新连接。",
   },
   12003: {
     code: 12003,
     phase: "failed",
     title: "连接超时",
-    message: "请靠近用户路由器后重新连接。",
+    message: "请靠近门店路由器后重新连接。",
   },
   12004: {
     code: 12004,
@@ -56,14 +56,14 @@ const DOCUMENTED_ERRORS: Readonly<Record<DocumentedWifiErrorCode, NormalizedWifi
   12008: {
     code: 12008,
     phase: "failed",
-    title: "未找到用户网络",
-    message: "请确认您在无线网络覆盖范围内，并靠近无线网络设备。",
+    title: "未找到门店网络",
+    message: "请确认您在门店内，并靠近无线网络设备。",
   },
   12009: {
     code: 12009,
     phase: "failed",
     title: "系统拒绝了网络配置",
-    message: "请在系统 Wi-Fi 设置中手动选择用户网络。",
+    message: "请在系统 Wi-Fi 设置中手动选择门店网络。",
   },
   12010: {
     code: 12010,
@@ -87,7 +87,7 @@ const DOCUMENTED_ERRORS: Readonly<Record<DocumentedWifiErrorCode, NormalizedWifi
     code: 12014,
     phase: "failed",
     title: "Wi-Fi 密码无效",
-    message: "iOS 无法使用当前 Wi-Fi 密码，请联系管理员确认网络配置。",
+    message: "iOS 无法使用当前 Wi-Fi 密码，请联系店员确认网络配置。",
   },
 };
 
@@ -95,20 +95,20 @@ const INTERNAL_ERRORS: Readonly<Record<WifiInternalErrorCode, NormalizedWifiErro
   adapter_disabled: {
     code: "adapter_disabled",
     phase: "unsupported",
-    title: "自动连接暂未开放",
-    message: "该能力需完成当前小程序真机验证后由平台开启。",
+    title: "请手动选择门店 Wi-Fi",
+    message: "请打开手机系统 Wi-Fi 设置，选择页面所示门店网络；需要帮助时请联系店员。",
   },
   api_unavailable: {
     code: "api_unavailable",
     phase: "unsupported",
     title: "当前版本暂不支持",
-    message: "请使用系统 Wi-Fi 设置手动连接用户网络。",
+    message: "请使用系统 Wi-Fi 设置手动连接门店网络。",
   },
   client_timeout: {
     code: "client_timeout",
     phase: "failed",
     title: "连接等待时间过长",
-    message: "请确认 Wi-Fi 已开启并靠近用户路由器，然后重新连接。",
+    message: "请确认 Wi-Fi 已开启并靠近门店路由器，然后重新连接。",
   },
   cancelled: {
     code: "cancelled",

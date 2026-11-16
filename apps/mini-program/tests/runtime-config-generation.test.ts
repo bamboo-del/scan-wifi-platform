@@ -29,6 +29,9 @@ async function generate(
         MINIPROGRAM_ALLOW_PLACEHOLDER_API: String(allowPlaceholder),
         MINIPROGRAM_ENABLE_LEGACY_WIFI_API: "false",
         MINIPROGRAM_AD_UNIT_ID: "",
+        ENABLE_WIFI_DIAGNOSTICS: "true",
+        ENABLE_ADS: "false",
+        ENABLE_ANALYTICS: "true",
       },
     },
   );
@@ -62,5 +65,8 @@ describe("mini-program runtime release gates", () => {
     expect(source).toContain('apiBaseUrl: "https://api.scan-wifi-production.cn"');
     expect(source).toContain("legacyWifiAdapterEnabled: false");
     expect(source).toContain('adUnitId: ""');
+    expect(source).toContain("enableWifiDiagnostics: false");
+    expect(source).toContain("enableAds: false");
+    expect(source).toContain("enableAnalytics: true");
   });
 });

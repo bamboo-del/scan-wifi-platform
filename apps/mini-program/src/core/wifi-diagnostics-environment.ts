@@ -1,4 +1,5 @@
 import type { WechatAccountInfo } from "../platform/wechat-types";
+import { FEATURES } from "../config/features";
 
 export interface MiniProgramEnvironmentApi {
   readonly getAccountInfoSync?: () => WechatAccountInfo;
@@ -22,5 +23,5 @@ export function getWifiDiagnosticsEnvironment(
 
 export function isWifiDiagnosticsEnvironment(api: MiniProgramEnvironmentApi): boolean {
   const environment = getWifiDiagnosticsEnvironment(api);
-  return environment === "develop" || environment === "trial";
+  return FEATURES.enableWifiDiagnostics && (environment === "develop" || environment === "trial");
 }

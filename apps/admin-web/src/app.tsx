@@ -1,12 +1,12 @@
 import * as React from "react";
-import { BrowserRouter, Navigate, Outlet, Route, Routes, useLocation } from "react-router-dom";
+import { BrowserRouter, Navigate, Outlet, Route, Routes, useLocation } from "react-router";
 
 import { AuthLoadingScreen, useAuth } from "@/auth/auth-context";
 import { AppShell } from "@/components/app-shell";
 import { PageSkeleton } from "@/components/resource-state";
 
-const AccountsPage = React.lazy(() => import("@/pages/accounts-page"));
-const PasswordPage = React.lazy(() => import("@/pages/password-page"));
+const MerchantsPage = React.lazy(() => import("@/pages/merchants-page"));
+const AnalyticsPage = React.lazy(() => import("@/pages/analytics-page"));
 const DashboardPage = React.lazy(() => import("@/pages/dashboard-page"));
 const LoginPage = React.lazy(() => import("@/pages/login-page"));
 const NotFoundPage = React.lazy(() => import("@/pages/not-found-page"));
@@ -29,11 +29,6 @@ function ProtectedRoute(): React.JSX.Element {
   return <Outlet />;
 }
 
-function PlatformAdminRoute(): React.JSX.Element {
-  const { admin } = useAuth();
-  return admin?.role === "admin" ? <Outlet /> : <Navigate to="/stores" replace />;
-}
-
 export function App(): React.JSX.Element {
   return (
     <BrowserRouter>
@@ -48,18 +43,16 @@ export function App(): React.JSX.Element {
           <Route path="/login" element={<LoginPage />} />
           <Route element={<ProtectedRoute />}>
             <Route element={<AppShell />}>
+              <Route index element={<DashboardPage />} />
+              <Route path="merchants" element={<MerchantsPage />} />
+              <Route path="analytics" element={<AnalyticsPage />} />
               <Route path="stores" element={<StoresPage />} />
               <Route path="stores/new" element={<StoreEditorPage />} />
               <Route path="stores/:id" element={<StoreDetailPage />} />
               <Route path="stores/:id/edit" element={<StoreEditorPage />} />
               <Route path="qrcodes" element={<QrCodesPage />} />
-              <Route path="password" element={<PasswordPage />} />
-              <Route element={<PlatformAdminRoute />}>
-                <Route index element={<DashboardPage />} />
-                <Route path="accounts" element={<AccountsPage />} />
-                <Route path="operation-logs" element={<OperationLogsPage />} />
-                <Route path="settings" element={<SettingsPage />} />
-              </Route>
+              <Route path="operation-logs" element={<OperationLogsPage />} />
+              <Route path="settings" element={<SettingsPage />} />
               <Route path="*" element={<NotFoundPage />} />
             </Route>
           </Route>

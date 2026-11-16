@@ -48,6 +48,9 @@ export function StatisticsPanel({ storeId }: { storeId: string }): React.JSX.Ele
 
   const totals = resource.data.totals;
   const metrics = [
+    { label: "独立访问 UV", value: totals.uniqueVisitors, icon: Eye },
+    { label: "扫码次数", value: totals.scans, icon: Eye },
+    { label: "复制密码", value: totals.passwordCopies, icon: MousePointerClick },
     { label: "页面访问", value: totals.pageViews, icon: Eye },
     { label: "连接点击", value: totals.connectClicks, icon: MousePointerClick },
     { label: "连接成功", value: totals.connectSuccesses, icon: Wifi },

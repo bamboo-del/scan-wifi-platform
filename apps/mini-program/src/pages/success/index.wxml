@@ -1,0 +1,7 @@
+<view class="success-page">
+  <view class="success-mark">{{verified ? '✓' : '—'}}</view>
+  <view class="success-title">{{verified ? '已连接 WiFi' : '尚未验证连接'}}</view>
+  <view>{{storeName}}</view><view class="ssid">{{ssid}}</view>
+  <view class="note">{{verified ? '已确认手机连接到目标 WiFi。网络能否访问互联网取决于门店路由器。' : '请扫描门店 WiFi 贴并连接。'}}</view>
+  <button bindtap="onHome">返回首页</button>
+</view>

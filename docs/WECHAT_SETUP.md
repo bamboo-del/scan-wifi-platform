@@ -8,7 +8,7 @@
 - Wi-Fi：`src/core/legacy-wechat-wifi-adapter.ts` 隔离调用 `wx.startWifi`、`wx.connectWifi` 与连接监听；前后端双开关默认均为 `false`。
 - 隐私接口：当前小程序不调用手机号、头像、昵称、位置等隐私保护 API，也没有调用 `wx.getPrivacySetting`、`wx.requirePrivacyAuthorize` 或 `wx.openPrivacyContract`；仍需在公众平台按实际接口扫描结果配置隐私保护指引和协议入口。
 - 小程序码：API 服务端调用 `getwxacodeunlimit`，固定 `check_path: true`、`env_version: release`，scene 只传随机 token。
-- 广告：运行时广告位 ID 默认为空，数据库迁移把全局广告默认值设为 `false`；只有全局开关、用户开关和非空广告位 ID 三者同时满足才渲染，广告加载失败不参与连接状态机。
+- 广告：运行时广告位 ID 默认为空，数据库迁移把全局广告默认值设为 `false`；只有全局开关、门店开关和非空广告位 ID 三者同时满足才渲染，广告加载失败不参与连接状态机。
 
 ## 1. 凭证
 
@@ -28,7 +28,7 @@ WECHAT_ENV_VERSION=release
 
 在微信公众平台配置经过备案且启用 HTTPS 的 request 合法域名，指向生产 API 域名。证书链必须完整；小程序不得直连 PostgreSQL 或对象存储私有管理端点。
 
-如果用户 Logo 使用独立 HTTPS 静态域名，还需按当前微信规则把它加入图片下载/资源合法域名；更稳妥的方案是由受控 API 或同一合法域名提供图片。不要使用任意外部 CDN URL。
+如果门店 Logo 使用独立 HTTPS 静态域名，还需按当前微信规则把它加入图片下载/资源合法域名；更稳妥的方案是由受控 API 或同一合法域名提供图片。不要使用任意外部 CDN URL。
 
 ## 3. 小程序公开运行时配置
 
@@ -101,8 +101,8 @@ pnpm.cmd --filter @scan-wifi/mini-program build:production
 
 1. 在流量主/腾讯广告后台创建适合页面顶部的 Banner 广告位。
 2. 构建前把 unit ID 写入公开环境变量 `MINIPROGRAM_AD_UNIT_ID`；生成器会把它注入小程序运行时配置，它不是 API 秘密。
-3. 全局和用户开关同时开启时才加载。
-4. 真机验证 load、1004 无填充、错误、后台关闭和用户关闭。
+3. 全局和门店开关同时开启时才加载。
+4. 真机验证 load、1004 无填充、错误、后台关闭和门店关闭。
 5. 广告不能覆盖、阻塞或伪装成连接按钮；不使用插屏或激励视频。
 
 ## 8. 人工清单

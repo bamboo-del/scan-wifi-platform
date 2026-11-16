@@ -1,4 +1,4 @@
-import type { AccountSummary } from "@scan-wifi/shared-types";
+import type { AnalyticsRow, MerchantResponse, WifiNetworkResponse } from "@scan-wifi/shared-types";
 import { demoApi } from "@/lib/demo-api";
 import type {
   AdminSession,
@@ -22,7 +22,6 @@ import type {
 
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? "").replace(/\/$/, "");
 const IS_DEMO_MODE = import.meta.env.VITE_DEMO_MODE === "true";
-export const SESSION_EXPIRED_EVENT = "admin-session-expired";
 
 export class ApiError extends Error {
   readonly code: string;
@@ -86,9 +85,6 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
 
   const body: unknown = await response.json().catch(() => null);
   if (!response.ok) {
-    if (response.status === 401 && path !== "/api/admin/auth/login") {
-      window.dispatchEvent(new Event(SESSION_EXPIRED_EVENT));
-    }
     if (isApiErrorEnvelope(body)) {
       throw new ApiError({
         message: body.error.message,
@@ -101,14 +97,6 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     throw new ApiError({
       message: response.status === 401 ? "登录已过期，请重新登录" : "服务暂时不可用，请稍后重试",
       code: response.status === 401 ? "UNAUTHENTICATED" : "HTTP_ERROR",
-      status: response.status,
-    });
-  }
-
-  if (body === null) {
-    throw new ApiError({
-      message: "服务返回了无效数据，请稍后重试",
-      code: "INVALID_RESPONSE",
       status: response.status,
     });
   }
@@ -144,6 +132,56 @@ async function demoCall<T>(callback: () => Promise<T>): Promise<T> {
 
 export const api = {
   isDemoMode: IS_DEMO_MODE,
+  listMerchants(): Promise<MerchantResponse[]> {
+    return IS_DEMO_MODE ? demoCall(() => demoApi.listMerchants()) : request("/api/admin/merchants");
+  },
+  saveMerchant(
+    payload: { name: string; contact: string | null; status: StoreStatus },
+    id?: string,
+  ): Promise<MerchantResponse> {
+    return IS_DEMO_MODE
+      ? demoCall(() => demoApi.saveMerchant(payload, id))
+      : request(`/api/admin/merchants${id ? `/${id}` : ""}`, {
+          method: id ? "PATCH" : "POST",
+          body: JSON.stringify(payload),
+        });
+  },
+  listNetworks(storeId: string): Promise<WifiNetworkResponse[]> {
+    return IS_DEMO_MODE
+      ? demoCall(() => demoApi.listNetworks(storeId))
+      : request(`/api/admin/stores/${storeId}/networks`);
+  },
+  saveNetwork(storeId: string, payload: WifiPayload, wifiId?: string): Promise<WifiStatusResponse> {
+    return IS_DEMO_MODE
+      ? demoCall(() => demoApi.saveNetwork(storeId, payload, wifiId))
+      : request(`/api/admin/stores/${storeId}/networks${wifiId ? `/${wifiId}` : ""}`, {
+          method: wifiId ? "PUT" : "POST",
+          body: JSON.stringify(payload),
+        });
+  },
+  setNetworkStatus(
+    storeId: string,
+    wifiId: string,
+    status: StoreStatus,
+  ): Promise<WifiStatusResponse> {
+    return IS_DEMO_MODE
+      ? demoCall(() => demoApi.setNetworkStatus(storeId, wifiId, status))
+      : request(`/api/admin/stores/${storeId}/networks/${wifiId}/status`, {
+          method: "PATCH",
+          body: JSON.stringify({ status }),
+        });
+  },
+  analytics(query: {
+    merchantId?: string;
+    storeId?: string;
+    wifiId?: string;
+    from: string;
+    to: string;
+  }): Promise<AnalyticsRow[]> {
+    return IS_DEMO_MODE
+      ? demoCall(() => demoApi.analytics(query))
+      : request(`/api/admin/analytics${queryString(query)}`);
+  },
   login(username: string, password: string): Promise<AdminSession> {
     return IS_DEMO_MODE
       ? demoCall(() => demoApi.login(username, password))
@@ -219,10 +257,15 @@ export const api = {
       throw error;
     }
   },
-  generateQrCode(storeId: string): Promise<QrCodeResponse> {
+  generateQrCode(storeId: string, wifiId?: string): Promise<QrCodeResponse> {
     return IS_DEMO_MODE
-      ? demoCall(() => demoApi.generateQrCode(storeId))
-      : request(`/api/admin/stores/${storeId}/qrcode`, { method: "POST" });
+      ? demoCall(() => demoApi.generateQrCode(storeId, wifiId))
+      : request(
+          wifiId
+            ? `/api/admin/stores/${storeId}/networks/${wifiId}/qrcode`
+            : `/api/admin/stores/${storeId}/qrcode`,
+          { method: "POST" },
+        );
   },
   setQrCodeStatus(qrId: string, status: QrCodeStatus): Promise<QrCodeResponse> {
     return IS_DEMO_MODE
@@ -257,49 +300,6 @@ export const api = {
       : request("/api/admin/settings", {
           method: "PATCH",
           body: JSON.stringify({ globalAdEnabled }),
-        });
-  },
-  listAccounts(): Promise<AccountSummary[]> {
-    return IS_DEMO_MODE ? demoCall(() => demoApi.listAccounts()) : request("/api/admin/accounts");
-  },
-  createOperator(username: string, password: string): Promise<AccountSummary> {
-    return IS_DEMO_MODE
-      ? demoCall(() => demoApi.createOperator(username, password))
-      : request("/api/admin/accounts", {
-          method: "POST",
-          body: JSON.stringify({ username, password }),
-        });
-  },
-  setAccountStatus(id: string, status: "active" | "disabled"): Promise<AccountSummary> {
-    return IS_DEMO_MODE
-      ? demoCall(() => demoApi.setAccountStatus(id, status))
-      : request(`/api/admin/accounts/${id}/status`, {
-          method: "PATCH",
-          body: JSON.stringify({ status }),
-        });
-  },
-  resetAccountPassword(id: string, password: string): Promise<AccountSummary> {
-    return IS_DEMO_MODE
-      ? demoCall(() => demoApi.resetAccountPassword(id, password))
-      : request(`/api/admin/accounts/${id}/password`, {
-          method: "POST",
-          body: JSON.stringify({ password }),
-        });
-  },
-  transferStore(id: string, ownerId: string | null, reason: string): Promise<void> {
-    return IS_DEMO_MODE
-      ? demoCall(() => demoApi.transferStore(id, ownerId, reason))
-      : request(`/api/admin/stores/${id}/transfer`, {
-          method: "POST",
-          body: JSON.stringify({ ownerId, reason }),
-        });
-  },
-  changePassword(currentPassword: string, newPassword: string): Promise<void> {
-    return IS_DEMO_MODE
-      ? demoCall(() => demoApi.changePassword(currentPassword, newPassword))
-      : request("/api/admin/auth/password", {
-          method: "POST",
-          body: JSON.stringify({ currentPassword, newPassword }),
         });
   },
   assetUrl(path: string): string {

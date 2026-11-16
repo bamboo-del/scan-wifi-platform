@@ -4,9 +4,9 @@ import KeyRound from "lucide-react/dist/esm/icons/key-round";
 import ShieldCheck from "lucide-react/dist/esm/icons/shield-check";
 import UserRound from "lucide-react/dist/esm/icons/user-round";
 import Wifi from "lucide-react/dist/esm/icons/wifi";
-import { Navigate, useLocation, useNavigate } from "react-router-dom";
+import { Navigate, useLocation, useNavigate } from "react-router";
 
-import { AuthLoadingScreen, useAuth } from "@/auth/auth-context";
+import { useAuth } from "@/auth/auth-context";
 import { Brand } from "@/components/brand";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -32,7 +32,6 @@ export default function LoginPage(): React.JSX.Element {
   const usernameInvalid = error !== null && !username.trim();
   const passwordInvalid = error !== null && !password;
 
-  if (status === "loading") return <AuthLoadingScreen />;
   if (status === "authenticated") return <Navigate to="/" replace />;
 
   const submit = async (event: React.FormEvent<HTMLFormElement>): Promise<void> => {
@@ -64,11 +63,10 @@ export default function LoginPage(): React.JSX.Element {
           </span>
           <div className="flex flex-col gap-3">
             <h1 className="text-4xl font-semibold leading-tight tracking-tight">
-              统一维护用户连接服务
+              统一维护门店连接服务
             </h1>
             <p className="max-w-lg text-base leading-8 text-muted-foreground">
-              管理用户资料、Wi-Fi
-              配置、小程序码和匿名连接统计。管理员与同仁使用各自账号登录，账号由管理员创建。
+              管理门店资料、Wi-Fi 配置、小程序码和匿名连接统计。平台管理员专用，不向商户开放注册。
             </p>
           </div>
           <div className="grid gap-3 text-sm text-muted-foreground sm:grid-cols-2">
@@ -91,7 +89,7 @@ export default function LoginPage(): React.JSX.Element {
             <Brand className="mb-6 lg:hidden" />
             <div className="flex flex-col gap-2">
               <CardTitle className="text-2xl">登录管理后台</CardTitle>
-              <CardDescription>平台管理员与同仁使用各自账号登录。</CardDescription>
+              <CardDescription>仅限平台管理员使用，请输入管理员凭据。</CardDescription>
             </div>
           </CardHeader>
           <CardContent>
@@ -109,7 +107,7 @@ export default function LoginPage(): React.JSX.Element {
               ) : null}
               <FieldGroup>
                 <Field data-invalid={usernameInvalid || undefined}>
-                  <FieldLabel htmlFor="username">用户名</FieldLabel>
+                  <FieldLabel htmlFor="username">管理员用户名</FieldLabel>
                   <div className="relative">
                     <UserRound
                       className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"

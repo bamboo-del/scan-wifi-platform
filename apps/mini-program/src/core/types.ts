@@ -1,4 +1,9 @@
 export type ConnectionPhase =
+  | "invalid"
+  | "disabled"
+  | "idle"
+  | "loading"
+  | "manual"
   | "waiting"
   | "initializing_wifi"
   | "connecting"
@@ -10,6 +15,8 @@ export type ConnectionPhase =
 
 export type PublicEventType =
   | "page_view"
+  | "scan"
+  | "password_copy"
   | "ad_load_success"
   | "ad_load_failure"
   | "connect_click"
@@ -20,11 +27,13 @@ export type EventPlatform = "ios" | "android" | "devtools" | "unknown";
 
 export interface PublicConnectConfig {
   readonly store: {
+    readonly id: string;
     readonly name: string;
     readonly shortName: string | null;
     readonly logoUrl: string | null;
   };
   readonly wifi: {
+    readonly id: string;
     readonly ssid: string;
     readonly bssid: string | null;
     readonly securityType: string | null;
@@ -43,15 +52,21 @@ export interface PublicEventInput {
   readonly sceneToken: string;
   readonly eventType: PublicEventType;
   readonly platform: EventPlatform;
+  readonly visitorId?: string;
   readonly errorCode?: string | null;
   readonly errorMessage?: string | null;
 }
 
 export interface PublicApi {
   getConnectConfig(sceneToken: string): Promise<PublicConnectConfig>;
-  getCredential(sceneToken: string): Promise<WifiConnectionSettings>;
+  getWifiCredential(sceneToken: string): Promise<PublicWifiCredential>;
   reportEvent(event: PublicEventInput): Promise<void>;
   dispose(): void;
+}
+
+export interface PublicWifiCredential extends WifiConnectionSettings {
+  readonly storeId: string;
+  readonly wifiId: string;
 }
 
 export interface WifiConnectionSettings {
@@ -112,6 +127,7 @@ export interface ConnectViewState {
   readonly logoUrl: string | null;
   readonly ssid: string;
   readonly buttonLabel: string;
+  readonly password: string;
   readonly buttonDisabled: boolean;
   readonly statusTitle: string;
   readonly statusMessage: string;

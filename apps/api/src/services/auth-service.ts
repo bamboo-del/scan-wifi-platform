@@ -3,7 +3,6 @@ import type { AdminSessionResponse } from "@scan-wifi/shared-types";
 import type { LoginInput } from "@scan-wifi/validation";
 import { unauthorized } from "../lib/errors.js";
 import type { PlatformRepository, SessionRecord } from "../repositories/platform-repository.js";
-import { accountRole } from "./access-service.js";
 import type { AuditService } from "./audit-service.js";
 import type { LoginThrottle } from "./login-throttle.js";
 import type { PasswordHasher } from "./password-service.js";
@@ -21,7 +20,6 @@ export class AuthService {
     private readonly throttle: LoginThrottle,
     private readonly sessionSecret: string,
     private readonly ttlHours: number,
-    private readonly adminUsername: string,
   ) {}
 
   public async login(input: LoginInput, throttleKey: string): Promise<AuthenticatedSession> {
@@ -58,11 +56,7 @@ export class AuthService {
       cookieValue,
       response: {
         authenticated: true,
-        admin: {
-          id: admin.id,
-          username: admin.username,
-          role: accountRole(admin.username, this.adminUsername),
-        },
+        admin: { id: admin.id, username: admin.username },
         expiresAt: expiresAt.toISOString(),
       },
     };
@@ -75,7 +69,7 @@ export class AuthService {
       new Date(),
     );
     if (!session || session.adminStatus !== "active") throw unauthorized();
-    return { ...session, adminRole: accountRole(session.adminUsername, this.adminUsername) };
+    return session;
   }
 
   public async logout(cookieValue: string | undefined, adminId: string | null): Promise<void> {
@@ -99,11 +93,7 @@ export class AuthService {
   public toResponse(session: SessionRecord): AdminSessionResponse {
     return {
       authenticated: true,
-      admin: {
-        id: session.adminId,
-        username: session.adminUsername,
-        role: accountRole(session.adminUsername, this.adminUsername),
-      },
+      admin: { id: session.adminId, username: session.adminUsername },
       expiresAt: session.expiresAt.toISOString(),
     };
   }

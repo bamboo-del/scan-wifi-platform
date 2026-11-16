@@ -16,7 +16,7 @@ const diagnosticsPage = "pages/wifi-diagnostics/index";
 
 const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
 const regularPages = manifest.pages.filter((page) => page !== diagnosticsPage);
-manifest.pages = productionMode ? regularPages : [...regularPages, diagnosticsPage];
+manifest.pages = productionMode ? ["pages/connect/index"] : [...regularPages, diagnosticsPage];
 const { pages, ...manifestWithoutPages } = manifest;
 const source = JSON.stringify(manifestWithoutPages, null, 2).replace(
   "{\n",

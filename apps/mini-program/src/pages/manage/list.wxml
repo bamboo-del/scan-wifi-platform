@@ -1,0 +1,15 @@
+<view class="manage-page">
+  <view class="heading">我的 WiFi 贴</view>
+  <view class="muted">创建、更新和管理门店 WiFi。修改密码后，原贴纸继续有效。</view>
+  <input placeholder="搜索店名、点位、SSID" value="{{search}}" bindinput="onSearch" bindconfirm="reload" />
+  <button bindtap="reload" loading="{{busy}}" disabled="{{busy}}">搜索 / 刷新</button>
+  <button class="primary" bindtap="onCreate" disabled="{{busy}}">创建 WiFi 贴</button>
+  <view wx:if="{{error}}" class="error">{{error}}</view>
+  <view wx:if="{{!busy && !error && items.length === 0}}" class="card muted">还没有匹配的 WiFi 贴</view>
+  <view wx:for="{{items}}" wx:key="id" class="card" bindtap="onDetail" data-id="{{item.id}}">
+    <view class="title">{{item.shopName}}</view><view>{{item.spotName}} · {{item.ssid}}</view>
+    <view class="muted">{{item.status === 'active' ? '已启用' : '已暂停'}} · 连接 {{item.connectCount}} 次</view>
+    <view class="muted">{{item.qrFileId ? '查看小程序码与海报' : '尚未生成小程序码'}}</view>
+  </view>
+  <button class="secondary" bindtap="onLogout">退出商家登录</button>
+</view>

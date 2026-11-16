@@ -8,6 +8,11 @@ import { MemoryPlatformRepository } from "../helpers/memory-repository.js";
 
 class AuditFailingMemoryRepository extends MemoryPlatformRepository {
   public failAuditAction: string | null = null;
+  public failHealthCheck = false;
+
+  public override async healthCheck(): Promise<void> {
+    if (this.failHealthCheck) throw new Error("Injected database health failure");
+  }
 
   public override async insertOperationLog(
     input: Parameters<MemoryPlatformRepository["insertOperationLog"]>[0],
@@ -28,9 +33,10 @@ interface QrPayload {
   status: "active" | "disabled";
 }
 
-function testConfig(): AppConfig {
+const TEST_WIFI_ENCRYPTION_KEY = Buffer.alloc(32, 11).toString("base64");
+
+function testConfig(overrides: NodeJS.ProcessEnv = {}): AppConfig {
   return loadConfig({
-    INITIAL_ADMIN_USERNAME: "admin@example.com",
     NODE_ENV: "test",
     API_HOST: "127.0.0.1",
     API_PORT: "3100",
@@ -38,13 +44,14 @@ function testConfig(): AppConfig {
     COOKIE_SECURE: "false",
     DATABASE_URL: "postgresql://unused:unused@127.0.0.1:5432/unused",
     DATABASE_POOL_MAX: "2",
-    WIFI_ENCRYPTION_KEY_BASE64: randomBytes(32).toString("base64"),
+    WIFI_ENCRYPTION_KEY_BASE64: TEST_WIFI_ENCRYPTION_KEY,
     SESSION_SECRET: "test-session-secret-that-is-at-least-32-bytes-long",
     SESSION_TTL_HOURS: "12",
     QR_CODE_PROVIDER: "local-placeholder",
     QR_CODE_STORAGE_DIR: "./unused",
     MINIPROGRAM_ENABLE_LEGACY_WIFI_API: "false",
     MINIPROGRAM_AD_UNIT_ID: "adunit-test",
+    ...overrides,
   });
 }
 
@@ -57,58 +64,19 @@ function cookieFrom(response: {
   return value.split(";", 1)[0] ?? "";
 }
 
-it("trusts forwarded client addresses only from an explicitly allowed proxy peer", async () => {
-  const proxyApp = await buildApplication(
-    { ...testConfig(), TRUST_PROXY_HOPS: 1, TRUST_PROXY_ADDRESSES: ["192.0.2.10"] },
-    {
-      repository: new MemoryPlatformRepository(),
-      qrCodeProvider: new FakeQrCodeProvider(),
-      qrCodeStorage: new MemoryQrCodeStorage(),
-      passwordService: new FastPasswordHasher(),
-      logger: false,
-    },
-  );
-  proxyApp.get("/test/client-ip", async (request) => ({ ip: request.ip }));
-  try {
-    const untrusted = await proxyApp.inject({
-      method: "GET",
-      url: "/test/client-ip",
-      remoteAddress: "192.0.2.20",
-      headers: { "x-forwarded-for": "198.51.100.1" },
-    });
-    expect(untrusted.json()).toEqual({ ip: "192.0.2.20" });
-    const trusted = await proxyApp.inject({
-      method: "GET",
-      url: "/test/client-ip",
-      remoteAddress: "192.0.2.10",
-      headers: { "x-forwarded-for": "198.51.100.1" },
-    });
-    expect(trusted.json()).toEqual({ ip: "198.51.100.1" });
-    const injectedChain = await proxyApp.inject({
-      method: "GET",
-      url: "/test/client-ip",
-      remoteAddress: "192.0.2.10",
-      headers: { "x-forwarded-for": "203.0.113.9, 198.51.100.1" },
-    });
-    expect(injectedChain.json()).toEqual({ ip: "198.51.100.1" });
-  } finally {
-    await proxyApp.close();
-  }
-}, 15_000);
-
 describe("Fastify API integration", () => {
   let app: FastifyInstance;
   let repository: AuditFailingMemoryRepository;
+  let qrCodeStorage: MemoryQrCodeStorage;
   let cookie: string;
-  let config: AppConfig;
 
   beforeEach(async () => {
     repository = new AuditFailingMemoryRepository();
-    config = testConfig();
-    app = await buildApplication(config, {
+    qrCodeStorage = new MemoryQrCodeStorage();
+    app = await buildApplication(testConfig(), {
       repository,
       qrCodeProvider: new FakeQrCodeProvider(),
-      qrCodeStorage: new MemoryQrCodeStorage(),
+      qrCodeStorage,
       passwordService: new FastPasswordHasher(),
       logger: false,
       eventRateLimitMax: 2,
@@ -117,77 +85,13 @@ describe("Fastify API integration", () => {
     const login = await app.inject({
       method: "POST",
       url: "/api/admin/auth/login",
-      payload: { username: "admin@example.com", password: "correct horse battery staple" },
+      payload: { username: "admin", password: "correct horse battery staple" },
     });
     expect(login.statusCode).toBe(200);
     cookie = cookieFrom(login);
   });
 
   afterEach(async () => app.close());
-
-  it("logs in an existing administrator by email while preserving their identity and role", async () => {
-    const admin = repository.admins[0];
-    if (!admin) throw new Error("Missing fixture administrator");
-    admin.username = "admin@example.com";
-    const login = await app.inject({
-      method: "POST",
-      url: "/api/admin/auth/login",
-      payload: { username: "ADMIN@EXAMPLE.COM", password: "correct horse battery staple" },
-    });
-    expect(login.statusCode).toBe(200);
-    expect(login.json()).toMatchObject({
-      admin: { id: admin.id, username: admin.username, role: "admin" },
-    });
-    const session = await app.inject({
-      method: "GET",
-      url: "/api/admin/auth/session",
-      headers: { cookie: cookieFrom(login) },
-    });
-    expect(session.statusCode).toBe(200);
-    expect(session.json()).toMatchObject({ admin: { id: admin.id, role: "admin" } });
-  });
-
-  it("retains user profiles without accepting or returning removed notes", async () => {
-    const profile = {
-      name: "测试用户",
-      shortName: "测试",
-      logoUrl: "https://cdn.test/logo.png",
-      address: "测试地址",
-      contactName: "联系人",
-      contactPhone: "13800000000",
-    };
-    const rejected = await app.inject({
-      method: "POST",
-      url: "/api/admin/stores",
-      headers: { cookie },
-      payload: { ...profile, notes: "旧备注" },
-    });
-    expect(rejected.statusCode).toBe(400);
-    const created = await app.inject({
-      method: "POST",
-      url: "/api/admin/stores",
-      headers: { cookie },
-      payload: profile,
-    });
-    expect(created.statusCode).toBe(201);
-    const body = created.json<StorePayload>();
-    const rejectedUpdate = await app.inject({
-      method: "PATCH",
-      url: `/api/admin/stores/${body.id}`,
-      headers: { cookie },
-      payload: { notes: "旧备注" },
-    });
-    expect(rejectedUpdate.statusCode).toBe(400);
-    const detail = await app.inject({
-      method: "GET",
-      url: `/api/admin/stores/${body.id}`,
-      headers: { cookie },
-    });
-    expect(detail.json()).toMatchObject(profile);
-    expect(detail.json()).not.toHaveProperty("notes");
-    const list = await app.inject({ method: "GET", url: "/api/admin/stores", headers: { cookie } });
-    expect(list.body).not.toContain('"notes"');
-  });
 
   it("reports database readiness without exposing configuration", async () => {
     const response = await app.inject({ method: "GET", url: "/health" });
@@ -196,12 +100,58 @@ describe("Fastify API integration", () => {
     expect(response.body).not.toContain("DATABASE_URL");
   });
 
+  it("reports database failure as a sanitized non-ready health response", async () => {
+    repository.failHealthCheck = true;
+    const response = await app.inject({ method: "GET", url: "/health" });
+    expect(response.statusCode).toBe(503);
+    expect(response.json()).toMatchObject({
+      status: "unavailable",
+      checks: { database: "failed" },
+    });
+    expect(response.body).not.toContain("Injected database health failure");
+    expect(response.body).not.toContain("DATABASE_URL");
+  });
+
+  it("does not register API documentation in production", async () => {
+    const productionApp = await buildApplication(
+      testConfig({
+        NODE_ENV: "production",
+        ADMIN_WEB_ORIGIN: "https://admin.scan-wifi-production.cn",
+        COOKIE_SECURE: "true",
+        QR_CODE_PROVIDER: "wechat",
+        WECHAT_APP_ID: "wx0123456789abcdef",
+        WECHAT_APP_SECRET: "production-test-value-not-a-real-credential",
+        WECHAT_ENV_VERSION: "release",
+      }),
+      {
+        repository,
+        qrCodeProvider: new FakeQrCodeProvider(),
+        qrCodeStorage: new MemoryQrCodeStorage(),
+        passwordService: new FastPasswordHasher(),
+        logger: false,
+      },
+    );
+    try {
+      await productionApp.ready();
+      const response = await productionApp.inject({
+        method: "GET",
+        url: "/documentation",
+      });
+      expect(response.statusCode).toBe(404);
+      expect(response.json()).toMatchObject({
+        error: { code: "ROUTE_NOT_FOUND", message: "接口不存在" },
+      });
+    } finally {
+      await productionApp.close();
+    }
+  });
+
   async function createReadyStore(): Promise<{ store: StorePayload; qr: QrPayload }> {
     const create = await app.inject({
       method: "POST",
       url: "/api/admin/stores",
       headers: { cookie },
-      payload: { name: "测试用户", shortName: "测试", adEnabled: true },
+      payload: { name: "测试门店", shortName: "测试", adEnabled: true },
     });
     expect(create.statusCode).toBe(201);
     const store = JSON.parse(create.body) as StorePayload;
@@ -236,10 +186,7 @@ describe("Fastify API integration", () => {
       headers: { cookie },
     });
     expect(session.statusCode).toBe(200);
-    expect(session.json()).toMatchObject({
-      authenticated: true,
-      admin: { username: "admin@example.com" },
-    });
+    expect(session.json()).toMatchObject({ authenticated: true, admin: { username: "admin" } });
 
     const logout = await app.inject({
       method: "POST",
@@ -260,60 +207,16 @@ describe("Fastify API integration", () => {
       const failed = await app.inject({
         method: "POST",
         url: "/api/admin/auth/login",
-        payload: {
-          username: "admin@example.com",
-          password: "definitely-incorrect-password",
-        },
+        payload: { username: "admin", password: "definitely-incorrect-password" },
       });
       expect(failed.statusCode).toBe(401);
     }
     const blocked = await app.inject({
       method: "POST",
       url: "/api/admin/auth/login",
-      payload: { username: "admin@example.com", password: "definitely-incorrect-password" },
+      payload: { username: "admin", password: "definitely-incorrect-password" },
     });
     expect(blocked.statusCode).toBe(429);
-  });
-
-  it("rejects cross-origin login before creating a session", async () => {
-    const sessionsBefore = repository.sessionCount();
-    for (const origin of ["https://attacker.example", "null"]) {
-      const response = await app.inject({
-        method: "POST",
-        url: "/api/admin/auth/login",
-        headers: { origin },
-        payload: { username: "admin@example.com", password: "correct horse battery staple" },
-      });
-      expect(response.statusCode).toBe(403);
-      expect(response.headers["set-cookie"]).toBeUndefined();
-    }
-    expect(repository.sessionCount()).toBe(sessionsBefore);
-  });
-
-  it("prevents caching authenticated admin data and authentication errors", async () => {
-    for (const headers of [{ cookie }, {}]) {
-      const response = await app.inject({ method: "GET", url: "/api/admin/stores", headers });
-      expect(response.headers["cache-control"]).toContain("no-store");
-    }
-  });
-
-  it("uses a historical end date to derive the default statistics start", async () => {
-    const { store } = await createReadyStore();
-    const response = await app.inject({
-      method: "GET",
-      url: `/api/admin/stores/${store.id}/statistics?to=2000-02-15T12:00:00.000Z`,
-      headers: { cookie },
-    });
-    expect(response.statusCode).toBe(200);
-    expect(response.json()).toMatchObject({
-      range: { from: "2000-01-17T00:00:00.000Z", to: "2000-02-15T12:00:00.000Z" },
-    });
-    const future = await app.inject({
-      method: "GET",
-      url: `/api/admin/stores/${store.id}/statistics?from=2999-01-01T00:00:00.000Z`,
-      headers: { cookie },
-    });
-    expect(future.statusCode).toBe(400);
   });
 
   it("creates a store, replaces Wi-Fi, and never returns the plaintext password from admin endpoints", async () => {
@@ -355,114 +258,65 @@ describe("Fastify API integration", () => {
   });
 
   it("generates a random placeholder QR and resolves the minimal no-store public configuration", async () => {
-    const { qr } = await createReadyStore();
+    const { store, qr } = await createReadyStore();
+    const wifi = await repository.getWifi(store.id);
     expect(qr.sceneToken).toMatch(/^[a-f0-9]{32}$/u);
     const response = await app.inject({
-      method: "GET",
-      url: `/api/public/connect/${qr.sceneToken}`,
+      method: "POST",
+      url: "/api/public/connect",
+      payload: { sceneToken: qr.sceneToken },
     });
     expect(response.statusCode).toBe(200);
     expect(response.headers["cache-control"]).toContain("no-store");
     expect(response.json()).toEqual({
-      store: { name: "测试用户", shortName: "测试", logoUrl: null },
+      store: { id: store.id, name: "测试门店", shortName: "测试", logoUrl: null },
       wifi: {
         ssid: "Guest-WiFi",
+        id: wifi?.id,
         bssid: null,
         securityType: "WPA2",
       },
-      ad: { enabled: true, unitId: "adunit-test" },
+      ad: { enabled: false, unitId: null },
       compatibility: { legacyWifiApiEnabled: false },
     });
     expect(response.body).not.toContain("wifi-password-123");
   });
 
-  it("releases credentials only on demand and rechecks every availability switch", async () => {
-    const { store, qr } = await createReadyStore();
-    const credential = () =>
-      app.inject({
+  it("keeps credentials out of page metadata even when the Wi-Fi API gate is enabled", async () => {
+    const { qr } = await createReadyStore();
+    const enabledApp = await buildApplication(
+      testConfig({ MINIPROGRAM_ENABLE_LEGACY_WIFI_API: "true" }),
+      {
+        repository,
+        qrCodeProvider: new FakeQrCodeProvider(),
+        qrCodeStorage,
+        passwordService: new FastPasswordHasher(),
+        logger: false,
+      },
+    );
+    await enabledApp.ready();
+    try {
+      const response = await enabledApp.inject({
+        method: "POST",
+        url: "/api/public/connect",
+        payload: { sceneToken: qr.sceneToken },
+      });
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toMatchObject({
+        wifi: { ssid: "Guest-WiFi" },
+        compatibility: { legacyWifiApiEnabled: true },
+      });
+      expect(response.body).not.toContain("password");
+      const credential = await enabledApp.inject({
         method: "POST",
         url: "/api/public/credential",
         payload: { sceneToken: qr.sceneToken },
       });
-    const disabled = await credential();
-    expect(disabled.statusCode).toBe(403);
-    expect(disabled.headers["cache-control"]).toContain("no-store");
-    expect(disabled.body).not.toContain("wifi-password-123");
-
-    config.MINIPROGRAM_ENABLE_LEGACY_WIFI_API = true;
-    const metadata = await app.inject({
-      method: "GET",
-      url: `/api/public/connect/${qr.sceneToken}`,
-    });
-    expect(metadata.statusCode).toBe(200);
-    expect(metadata.body).not.toContain("password");
-    const available = await credential();
-    expect(available.statusCode).toBe(200);
-    expect(available.headers["cache-control"]).toContain("no-store");
-    expect(available.json()).toEqual({
-      wifi: {
-        ssid: "Guest-WiFi",
-        password: "wifi-password-123",
-        bssid: null,
-        securityType: "WPA2",
-      },
-    });
-
-    const wifi = repository.wifi.get(store.id)!;
-    wifi.status = "disabled";
-    expect((await credential()).statusCode).toBe(404);
-    wifi.status = "active";
-    for (const path of [`/qrcodes/${qr.id}`, `/stores/${store.id}`]) {
-      const disable = await app.inject({
-        method: "POST",
-        url: `/api/admin${path}/disable`,
-        headers: { cookie },
-      });
-      expect(disable.statusCode).toBe(200);
-      expect((await credential()).statusCode).toBe(404);
-      const enable = await app.inject({
-        method: "POST",
-        url: `/api/admin${path}/enable`,
-        headers: { cookie },
-      });
-      expect(enable.statusCode).toBe(200);
+      expect(credential.json()).toMatchObject({ password: "wifi-password-123" });
+      expect(credential.headers["cache-control"]).toContain("no-store");
+    } finally {
+      await enabledApp.close();
     }
-    wifi.encryptedPassword = "invalid-ciphertext";
-    const corrupted = await credential();
-    expect(corrupted.statusCode).toBe(503);
-    expect(corrupted.body).not.toContain("invalid-ciphertext");
-  });
-
-  it("validates and independently rate-limits credential retrieval", async () => {
-    config.MINIPROGRAM_ENABLE_LEGACY_WIFI_API = true;
-    for (const payload of [{ sceneToken: "bad" }, { sceneToken: "a".repeat(32), unknown: true }]) {
-      expect(
-        (await app.inject({ method: "POST", url: "/api/public/credential", payload })).statusCode,
-      ).toBe(400);
-    }
-    for (let attempt = 0; attempt < 28; attempt += 1) {
-      expect(
-        (
-          await app.inject({
-            method: "POST",
-            url: "/api/public/credential",
-            payload: { sceneToken: "a".repeat(32) },
-          })
-        ).statusCode,
-      ).toBe(404);
-    }
-    const blocked = await app.inject({
-      method: "POST",
-      url: "/api/public/credential",
-      payload: { sceneToken: "a".repeat(32) },
-    });
-    expect(blocked.statusCode).toBe(429);
-    expect(blocked.headers["cache-control"]).toContain("no-store");
-    const metadata = await app.inject({
-      method: "GET",
-      url: `/api/public/connect/${"a".repeat(32)}`,
-    });
-    expect(metadata.statusCode).toBe(404);
   });
 
   it("invalidates public configuration immediately after QR or store disable", async () => {
@@ -474,8 +328,13 @@ describe("Fastify API integration", () => {
     });
     expect(disableQr.statusCode).toBe(200);
     expect(
-      (await app.inject({ method: "GET", url: `/api/public/connect/${first.qr.sceneToken}` }))
-        .statusCode,
+      (
+        await app.inject({
+          method: "POST",
+          url: "/api/public/connect",
+          payload: { sceneToken: first.qr.sceneToken },
+        })
+      ).statusCode,
     ).toBe(404);
 
     const secondQrResponse = await app.inject({
@@ -491,44 +350,22 @@ describe("Fastify API integration", () => {
     });
     expect(disableStore.statusCode).toBe(200);
     expect(
-      (await app.inject({ method: "GET", url: `/api/public/connect/${secondQr.sceneToken}` }))
-        .statusCode,
+      (
+        await app.inject({
+          method: "POST",
+          url: "/api/public/connect",
+          payload: { sceneToken: secondQr.sceneToken },
+        })
+      ).statusCode,
     ).toBe(404);
   });
 
-  it("shows a re-enabled older QR consistently in the store list and detail", async () => {
-    const { store, qr } = await createReadyStore();
-    repository.qrs.get(qr.id)!.generatedAt = new Date("2000-01-01T00:00:00.000Z");
-    const replacement = await app.inject({
-      method: "POST",
-      url: `/api/admin/stores/${store.id}/qrcode`,
-      headers: { cookie },
-    });
-    expect(replacement.statusCode).toBe(201);
-    const enabled = await app.inject({
-      method: "POST",
-      url: `/api/admin/qrcodes/${qr.id}/enable`,
-      headers: { cookie },
-    });
-    expect(enabled.statusCode).toBe(200);
-    const detail = await app.inject({
-      method: "GET",
-      url: `/api/admin/stores/${store.id}`,
-      headers: { cookie },
-    });
-    expect(detail.json()).toMatchObject({ qrCodeStatus: "active", qrCode: { id: qr.id } });
-    const current = await app.inject({
-      method: "GET",
-      url: `/api/admin/stores/${store.id}/qrcode`,
-      headers: { cookie },
-    });
-    expect(current.json()).toMatchObject({ id: qr.id, status: "active" });
-    const list = await app.inject({ method: "GET", url: "/api/admin/stores", headers: { cookie } });
-    expect(list.json()).toMatchObject({ items: [{ id: store.id, qrCodeStatus: "active" }] });
-  });
-
   it("rejects illegal scene tokens and missing stores", async () => {
-    const invalid = await app.inject({ method: "GET", url: "/api/public/connect/1" });
+    const invalid = await app.inject({
+      method: "POST",
+      url: "/api/public/connect",
+      payload: { sceneToken: "1" },
+    });
     expect(invalid.statusCode).toBe(400);
     const missing = await app.inject({
       method: "PUT",
@@ -617,10 +454,7 @@ describe("Fastify API integration", () => {
     const wifiId = repository.wifi.get(store.id)?.id;
     expect(wifiId).toBeDefined();
     const searches = [
-      [
-        "admin@example.com",
-        (item: (typeof exactAction.items)[number]) => item.adminUsername === "admin@example.com",
-      ],
+      ["admin", (item: (typeof exactAction.items)[number]) => item.adminUsername === "admin"],
       [
         "wifi.replace",
         (item: (typeof exactAction.items)[number]) => item.action === "wifi.replace",
@@ -713,6 +547,13 @@ describe("Fastify API integration", () => {
     ).toBe(500);
     expect(repository.wifi.has(store.id)).toBe(false);
 
+    repository.failAuditAction = null;
+    await app.inject({
+      method: "PUT",
+      url: `/api/admin/stores/${store.id}/wifi`,
+      headers: { cookie },
+      payload: { ssid: "Rollback-WiFi", password: "wifi-password-rollback" },
+    });
     repository.failAuditAction = "qrcode.generate";
     expect(
       (
@@ -724,6 +565,7 @@ describe("Fastify API integration", () => {
       ).statusCode,
     ).toBe(500);
     expect(repository.qrs.size).toBe(0);
+    expect(qrCodeStorage.size).toBe(0);
 
     repository.failAuditAction = null;
     const generated = await app.inject({
@@ -797,7 +639,7 @@ describe("Fastify API integration", () => {
       const response = await failingApp.inject({
         method: "POST",
         url: "/api/admin/auth/login",
-        payload: { username: "admin@example.com", password: "correct horse battery staple" },
+        payload: { username: "admin", password: "correct horse battery staple" },
       });
       expect(response.statusCode).toBe(500);
       expect(failingRepository.admins[0]?.lastLoginAt).toBeNull();

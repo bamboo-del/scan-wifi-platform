@@ -1,5 +1,5 @@
+import type { MerchantResponse } from "@scan-wifi/shared-types";
 import * as React from "react";
-import { useAuth } from "@/auth/auth-context";
 import ArrowLeft from "lucide-react/dist/esm/icons/arrow-left";
 import CircleCheck from "lucide-react/dist/esm/icons/circle-check";
 import EyeOff from "lucide-react/dist/esm/icons/eye-off";
@@ -9,9 +9,9 @@ import PauseCircle from "lucide-react/dist/esm/icons/pause-circle";
 import PlayCircle from "lucide-react/dist/esm/icons/play-circle";
 import Save from "lucide-react/dist/esm/icons/save";
 import ShieldCheck from "lucide-react/dist/esm/icons/shield-check";
-import UserRound from "lucide-react/dist/esm/icons/user-round";
+import Store from "lucide-react/dist/esm/icons/store";
 import Wifi from "lucide-react/dist/esm/icons/wifi";
-import { Link, Navigate, useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router";
 import { toast } from "sonner";
 
 import { ConfirmActionDialog } from "@/components/confirm-action-dialog";
@@ -45,6 +45,7 @@ import { Separator } from "@/components/ui/separator";
 import { Spinner } from "@/components/ui/spinner";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Textarea } from "@/components/ui/textarea";
 import { useAsyncResource } from "@/hooks/use-async-resource";
 import { api } from "@/lib/api";
 import { formatDateTime } from "@/lib/format";
@@ -54,7 +55,7 @@ import {
   type StoreDraftErrors,
   validateStoreDraft,
 } from "@/lib/store-validation";
-import type { QrCodeResponse, StoreDetail, StorePayload } from "@/lib/types";
+import type { QrCodeResponse, StoreDetail, StorePayload, SystemSettings } from "@/lib/types";
 import {
   formatWifiSecurityType,
   isEditableWifiSecurityType,
@@ -69,7 +70,8 @@ const EMPTY_DRAFT: StoreDraft = {
   address: "",
   contactName: "",
   contactPhone: "",
-  adEnabled: true,
+  notes: "",
+  adEnabled: false,
   status: "active",
   ssid: "",
   bssid: "",
@@ -81,6 +83,8 @@ const EMPTY_DRAFT: StoreDraft = {
 
 interface EditorBundle {
   store: StoreDetail | null;
+  settings: SystemSettings;
+  merchants: MerchantResponse[];
 }
 
 function toDraft(store: StoreDetail | null): StoreDraft {
@@ -92,6 +96,7 @@ function toDraft(store: StoreDetail | null): StoreDraft {
     address: store.address ?? "",
     contactName: store.contactName ?? "",
     contactPhone: store.contactPhone ?? "",
+    notes: store.notes ?? "",
     adEnabled: store.adEnabled,
     status: store.status,
     ssid: store.wifi.ssid ?? "",
@@ -111,17 +116,17 @@ function toStorePayload(draft: StoreDraft): StorePayload {
     address: draft.address.trim() || null,
     contactName: draft.contactName.trim() || null,
     contactPhone: draft.contactPhone.trim() || null,
+    notes: draft.notes.trim() || null,
     adEnabled: draft.adEnabled,
     status: draft.status,
   };
 }
 
 export default function StoreEditorPage(): React.JSX.Element {
-  const { admin } = useAuth();
-  const isAdmin = admin?.role === "admin";
   const { id } = useParams<{ id: string }>();
   const isNew = !id;
   const navigate = useNavigate();
+  const [merchantId, setMerchantId] = React.useState("");
   const [draft, setDraft] = React.useState<StoreDraft>({ ...EMPTY_DRAFT });
   const [errors, setErrors] = React.useState<StoreDraftErrors>({});
   const [passwordEditing, setPasswordEditing] = React.useState(isNew);
@@ -129,16 +134,21 @@ export default function StoreEditorPage(): React.JSX.Element {
   const [qrCode, setQrCode] = React.useState<QrCodeResponse | null>(null);
 
   const loader = React.useCallback(async (): Promise<EditorBundle> => {
-    const store = id ? await api.getStore(id) : null;
-    return { store };
+    const [store, settings, merchants] = await Promise.all([
+      id ? api.getStore(id) : Promise.resolve(null),
+      api.settings(),
+      api.listMerchants(),
+    ]);
+    return { store, settings, merchants };
   }, [id]);
   const { resource, reload } = useAsyncResource(loader);
 
   React.useEffect(() => {
     if (resource.status !== "success") return;
     setDraft(toDraft(resource.data.store));
+    setMerchantId(resource.data.store?.merchantId ?? resource.data.merchants[0]?.id ?? "");
     setQrCode(resource.data.store?.qrCode ?? null);
-    setPasswordEditing(isNew || !resource.data.store?.wifi.configured);
+    setPasswordEditing(isNew);
     setErrors({});
   }, [isNew, resource]);
 
@@ -146,19 +156,13 @@ export default function StoreEditorPage(): React.JSX.Element {
   if (resource.status === "error") {
     return (
       <div className="flex flex-col gap-6">
-        <PageHeader title={isNew ? "新建用户" : "编辑用户"} />
+        <PageHeader title={isNew ? "新建门店" : "编辑门店"} />
         <ResourceError error={resource.error} onRetry={reload} />
       </div>
     );
   }
 
   const store = resource.data.store;
-  if (
-    !isAdmin &&
-    store &&
-    (store.wifi.configured || store.createdById !== admin?.id || store.status !== "active")
-  )
-    return <Navigate to={`/stores/${store.id}`} replace />;
   const initialDraft = toDraft(store);
   const wifiConfigurationChanged =
     draft.ssid !== initialDraft.ssid ||
@@ -178,7 +182,6 @@ export default function StoreEditorPage(): React.JSX.Element {
 
   const saveStore = async (event: React.FormEvent<HTMLFormElement>): Promise<void> => {
     event.preventDefault();
-    if (pending) return;
     const requiresPassword =
       isNew || passwordEditing || wifiConfigurationChanged || !store?.wifi.configured;
     const nextErrors = validateStoreDraft(draft, { requireWifiPassword: requiresPassword });
@@ -193,46 +196,42 @@ export default function StoreEditorPage(): React.JSX.Element {
       if (isNew) {
         const created = await api.createStore({
           ...toStorePayload(draft),
-          ...(!isAdmin ? { status: "active", adEnabled: false } : {}),
+          ...(merchantId ? { merchantId } : {}),
         });
         try {
           await api.updateWifi(created.id, {
-            ssid: draft.ssid,
+            ssid: draft.ssid.trim(),
             password: draft.newPassword,
             ...(draft.bssid.trim() ? { bssid: draft.bssid.trim() } : {}),
             securityType: draft.securityType,
             status: draft.wifiStatus,
           });
         } catch {
-          toast.error("用户已创建，但 Wi-Fi 配置失败，请在编辑页重试");
+          toast.error("门店已创建，但 Wi-Fi 配置失败，请在编辑页重试");
           void navigate(`/stores/${created.id}/edit`, { replace: true });
           return;
         }
-        toast.success("用户已创建");
-        void navigate(`/stores/${created.id}${isAdmin ? "/edit" : ""}`, { replace: true });
+        toast.success("门店已创建");
+        void navigate(`/stores/${created.id}/edit`, { replace: true });
       } else if (store) {
-        if (isAdmin) await api.updateStore(store.id, toStorePayload(draft));
+        const writes: Array<Promise<unknown>> = [
+          api.updateStore(store.id, {
+            ...toStorePayload(draft),
+            ...(merchantId ? { merchantId } : {}),
+          }),
+        ];
         if (requiresPassword) {
-          try {
-            await api.updateWifi(store.id, {
-              ssid: draft.ssid,
+          writes.push(
+            api.updateWifi(store.id, {
+              ssid: draft.ssid.trim(),
               password: draft.newPassword,
               ...(draft.bssid.trim() ? { bssid: draft.bssid.trim() } : {}),
               securityType: draft.securityType,
               status: draft.wifiStatus,
-            });
-          } catch (error) {
-            toast.error(
-              `${isAdmin ? "用户资料已保存，但 " : ""}Wi-Fi 配置失败：${error instanceof Error ? error.message : "请重试"}`,
-            );
-            return;
-          }
+            }),
+          );
         }
-        if (!isAdmin) {
-          toast.success("初始 Wi-Fi 已配置");
-          void navigate(`/stores/${store.id}`, { replace: true });
-          return;
-        }
+        await Promise.all(writes);
         toast.success("更改已保存");
         setPasswordEditing(false);
         reload();
@@ -253,7 +252,7 @@ export default function StoreEditorPage(): React.JSX.Element {
         store.status === "active" ? "disabled" : "active",
       );
       update("status", updated.status);
-      toast.success(updated.status === "active" ? "用户已启用" : "用户已停用");
+      toast.success(updated.status === "active" ? "门店已启用" : "门店已停用");
       reload();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "状态更新失败");
@@ -270,10 +269,10 @@ export default function StoreEditorPage(): React.JSX.Element {
       noValidate
     >
       <PageHeader
-        title={isNew ? "新建用户" : (store?.name ?? "编辑用户")}
+        title={isNew ? "新建门店" : (store?.name ?? "编辑门店")}
         breadcrumbs={[
-          { label: "用户管理", href: "/stores" },
-          { label: isNew ? "新建用户" : (store?.name ?? "编辑用户") },
+          { label: "门店管理", href: "/stores" },
+          { label: isNew ? "新建门店" : (store?.name ?? "编辑门店") },
         ]}
         actions={
           <>
@@ -283,7 +282,7 @@ export default function StoreEditorPage(): React.JSX.Element {
                 取消
               </Link>
             </Button>
-            {store && isAdmin ? (
+            {store ? (
               <ConfirmActionDialog
                 trigger={
                   <Button type="button" variant="outline" disabled={pending}>
@@ -292,14 +291,14 @@ export default function StoreEditorPage(): React.JSX.Element {
                     ) : (
                       <PlayCircle data-icon="inline-start" />
                     )}
-                    {store.status === "active" ? "停用用户" : "启用用户"}
+                    {store.status === "active" ? "停用门店" : "启用门店"}
                   </Button>
                 }
-                title={store.status === "active" ? "停用用户？" : "启用用户？"}
+                title={store.status === "active" ? "停用门店？" : "启用门店？"}
                 description={
                   store.status === "active"
-                    ? "停用后，该用户扫码连接服务会立即不可用。"
-                    : "启用后，该用户会恢复提供扫码连接服务。"
+                    ? "停用后，该门店扫码连接服务会立即不可用。"
+                    : "启用后，该门店会恢复提供扫码连接服务。"
                 }
                 confirmLabel={store.status === "active" ? "确认停用" : "确认启用"}
                 destructive={store.status === "active"}
@@ -323,18 +322,16 @@ export default function StoreEditorPage(): React.JSX.Element {
         {api.isDemoMode ? <Badge variant="warning">演示模式</Badge> : null}
       </div>
 
-      <Tabs defaultValue={!isAdmin && store ? "wifi" : "basic"}>
+      <Tabs defaultValue="basic">
         <TabsList>
-          <TabsTrigger value="basic">用户资料</TabsTrigger>
+          <TabsTrigger value="basic">基础信息</TabsTrigger>
           <TabsTrigger value="wifi">Wi-Fi 配置</TabsTrigger>
           <TabsTrigger value="qrcode" disabled={!store}>
             二维码
           </TabsTrigger>
-          {isAdmin ? (
-            <TabsTrigger value="statistics" disabled={!store}>
-              统计
-            </TabsTrigger>
-          ) : null}
+          <TabsTrigger value="statistics" disabled={!store}>
+            统计
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="basic">
@@ -342,139 +339,166 @@ export default function StoreEditorPage(): React.JSX.Element {
             <Card>
               <CardHeader>
                 <div className="flex flex-col gap-1.5">
-                  <CardTitle>用户资料</CardTitle>
+                  <CardTitle>基础信息</CardTitle>
                   <CardDescription>用于后台识别和顾客扫码页展示。</CardDescription>
                 </div>
               </CardHeader>
               <CardContent>
-                <fieldset disabled={!isAdmin && !isNew}>
-                  <FieldGroup>
-                    <div className="grid gap-5 md:grid-cols-2">
-                      <Field data-invalid={!!errors.name || undefined}>
-                        <FieldLabel htmlFor="store-name">用户名称 *</FieldLabel>
-                        <Input
-                          id="store-name"
-                          value={draft.name}
-                          onChange={(event) => update("name", event.target.value)}
-                          aria-invalid={!!errors.name || undefined}
-                        />
-                        {errors.name ? <FieldError>{errors.name}</FieldError> : null}
-                      </Field>
-                      <Field>
-                        <FieldLabel htmlFor="short-name">简称</FieldLabel>
-                        <Input
-                          id="short-name"
-                          value={draft.shortName}
-                          onChange={(event) => update("shortName", event.target.value)}
-                        />
-                      </Field>
-                    </div>
-                    <Field>
-                      <FieldLabel htmlFor="address">地址</FieldLabel>
-                      <div className="relative">
-                        <Input
-                          id="address"
-                          className="pr-9"
-                          value={draft.address}
-                          onChange={(event) => update("address", event.target.value)}
-                        />
-                        <MapPin
-                          className="pointer-events-none absolute right-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
-                          aria-hidden="true"
-                        />
-                      </div>
-                    </Field>
-                    <div className="grid gap-5 md:grid-cols-2">
-                      <Field>
-                        <FieldLabel htmlFor="contact-name">联系人</FieldLabel>
-                        <Input
-                          id="contact-name"
-                          value={draft.contactName}
-                          onChange={(event) => update("contactName", event.target.value)}
-                        />
-                      </Field>
-                      <Field data-invalid={!!errors.contactPhone || undefined}>
-                        <FieldLabel htmlFor="contact-phone">联系电话</FieldLabel>
-                        <Input
-                          id="contact-phone"
-                          inputMode="tel"
-                          value={draft.contactPhone}
-                          onChange={(event) => update("contactPhone", event.target.value)}
-                          aria-invalid={!!errors.contactPhone || undefined}
-                        />
-                        {errors.contactPhone ? (
-                          <FieldError>{errors.contactPhone}</FieldError>
-                        ) : null}
-                      </Field>
-                    </div>
-                    <Field data-invalid={!!errors.logoUrl || undefined}>
-                      <FieldLabel htmlFor="logo-url">用户 Logo 地址</FieldLabel>
+                <FieldGroup>
+                  <Field>
+                    <FieldLabel htmlFor="store-merchant">所属商户</FieldLabel>
+                    <select
+                      id="store-merchant"
+                      className="h-10 rounded-md border bg-background px-3 text-sm"
+                      value={merchantId}
+                      onChange={(event) => setMerchantId(event.target.value)}
+                    >
+                      {resource.data.merchants.map((merchant) => (
+                        <option key={merchant.id} value={merchant.id}>
+                          {merchant.name}
+                          {merchant.status === "disabled" ? "（已停用）" : ""}
+                        </option>
+                      ))}
+                    </select>
+                  </Field>
+                  <div className="grid gap-5 md:grid-cols-2">
+                    <Field data-invalid={!!errors.name || undefined}>
+                      <FieldLabel htmlFor="store-name">门店名称 *</FieldLabel>
                       <Input
-                        id="logo-url"
-                        type="url"
-                        value={draft.logoUrl}
-                        onChange={(event) => update("logoUrl", event.target.value)}
-                        aria-invalid={!!errors.logoUrl || undefined}
-                        placeholder="https://…（可选）"
+                        id="store-name"
+                        value={draft.name}
+                        onChange={(event) => update("name", event.target.value)}
+                        aria-invalid={!!errors.name || undefined}
                       />
-                      {errors.logoUrl ? <FieldError>{errors.logoUrl}</FieldError> : null}
-                      <FieldDescription>
-                        建议使用 256×256 px 的 JPG 或 PNG；不使用外部 CDN。
-                      </FieldDescription>
+                      {errors.name ? <FieldError>{errors.name}</FieldError> : null}
                     </Field>
-                  </FieldGroup>
-                </fieldset>
+                    <Field>
+                      <FieldLabel htmlFor="short-name">简称</FieldLabel>
+                      <Input
+                        id="short-name"
+                        value={draft.shortName}
+                        onChange={(event) => update("shortName", event.target.value)}
+                      />
+                    </Field>
+                  </div>
+                  <Field>
+                    <FieldLabel htmlFor="address">地址</FieldLabel>
+                    <div className="relative">
+                      <Input
+                        id="address"
+                        className="pr-9"
+                        value={draft.address}
+                        onChange={(event) => update("address", event.target.value)}
+                      />
+                      <MapPin
+                        className="pointer-events-none absolute right-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
+                        aria-hidden="true"
+                      />
+                    </div>
+                  </Field>
+                  <div className="grid gap-5 md:grid-cols-2">
+                    <Field>
+                      <FieldLabel htmlFor="contact-name">联系人</FieldLabel>
+                      <Input
+                        id="contact-name"
+                        value={draft.contactName}
+                        onChange={(event) => update("contactName", event.target.value)}
+                      />
+                    </Field>
+                    <Field data-invalid={!!errors.contactPhone || undefined}>
+                      <FieldLabel htmlFor="contact-phone">联系电话</FieldLabel>
+                      <Input
+                        id="contact-phone"
+                        inputMode="tel"
+                        value={draft.contactPhone}
+                        onChange={(event) => update("contactPhone", event.target.value)}
+                        aria-invalid={!!errors.contactPhone || undefined}
+                      />
+                      {errors.contactPhone ? <FieldError>{errors.contactPhone}</FieldError> : null}
+                    </Field>
+                  </div>
+                  <Field>
+                    <FieldLabel htmlFor="logo-url">门店 Logo 地址</FieldLabel>
+                    <Input
+                      id="logo-url"
+                      type="url"
+                      value={draft.logoUrl}
+                      onChange={(event) => update("logoUrl", event.target.value)}
+                      placeholder="https://…（可选）"
+                    />
+                    <FieldDescription>
+                      建议使用 256×256 px 的 JPG 或 PNG；不使用外部 CDN。
+                    </FieldDescription>
+                  </Field>
+                  <Field data-invalid={!!errors.notes || undefined}>
+                    <div className="flex items-center justify-between gap-4">
+                      <FieldLabel htmlFor="notes">备注</FieldLabel>
+                      <span className="text-xs text-muted-foreground">
+                        {draft.notes.length} / 200
+                      </span>
+                    </div>
+                    <Textarea
+                      id="notes"
+                      maxLength={200}
+                      value={draft.notes}
+                      onChange={(event) => update("notes", event.target.value)}
+                      aria-invalid={!!errors.notes || undefined}
+                      placeholder="内部备注，不向顾客展示"
+                    />
+                    {errors.notes ? <FieldError>{errors.notes}</FieldError> : null}
+                  </Field>
+                </FieldGroup>
               </CardContent>
             </Card>
 
             <aside className="flex flex-col gap-5">
-              {isAdmin ? (
-                <Card>
-                  <CardHeader>
+              <Card>
+                <CardHeader>
+                  <div className="flex flex-col gap-1.5">
+                    <CardTitle>连接服务</CardTitle>
+                    <CardDescription>控制门店服务与广告展示。</CardDescription>
+                  </div>
+                </CardHeader>
+                <CardContent className="flex flex-col gap-5">
+                  <Field orientation="horizontal">
                     <div className="flex flex-col gap-1.5">
-                      <CardTitle>连接服务</CardTitle>
-                      <CardDescription>控制用户服务与广告展示。</CardDescription>
+                      <FieldTitle id="store-status-label">门店状态</FieldTitle>
+                      <FieldDescription>停用后，门店无法提供连接服务。</FieldDescription>
                     </div>
-                  </CardHeader>
-                  <CardContent className="flex flex-col gap-5">
-                    <Field orientation="horizontal">
-                      <div className="flex flex-col gap-1.5">
-                        <FieldTitle id="store-status-label">用户状态</FieldTitle>
-                        <FieldDescription>停用后，用户无法提供连接服务。</FieldDescription>
-                      </div>
-                      <Switch
-                        aria-labelledby="store-status-label"
-                        checked={draft.status === "active"}
-                        onCheckedChange={(checked) =>
-                          update("status", checked ? "active" : "disabled")
-                        }
-                      />
-                    </Field>
-                    <Field orientation="horizontal">
-                      <div className="flex flex-col gap-1.5">
-                        <FieldTitle id="store-ad-label">用户广告</FieldTitle>
-                        <FieldDescription>全局和用户均开启时才加载。</FieldDescription>
-                      </div>
-                      <Switch
-                        aria-labelledby="store-ad-label"
-                        checked={draft.adEnabled}
-                        onCheckedChange={(checked) => update("adEnabled", checked)}
-                      />
-                    </Field>
-                    <Separator />
-                    <div className="flex items-start gap-3 text-sm">
-                      <ShieldCheck
-                        className="mt-0.5 size-4 shrink-0 text-primary"
-                        aria-hidden="true"
-                      />
-                      <div className="flex flex-col gap-1">
-                        <span className="font-medium">全局广告状态</span>
-                        <span className="text-muted-foreground">按平台全局开关生效</span>
-                      </div>
+                    <Switch
+                      aria-labelledby="store-status-label"
+                      checked={draft.status === "active"}
+                      onCheckedChange={(checked) =>
+                        update("status", checked ? "active" : "disabled")
+                      }
+                    />
+                  </Field>
+                  <Field orientation="horizontal">
+                    <div className="flex flex-col gap-1.5">
+                      <FieldTitle id="store-ad-label">门店广告</FieldTitle>
+                      <FieldDescription>全局和门店均开启时才加载。</FieldDescription>
                     </div>
-                  </CardContent>
-                </Card>
-              ) : null}
+                    <Switch
+                      aria-labelledby="store-ad-label"
+                      checked={draft.adEnabled}
+                      onCheckedChange={(checked) => update("adEnabled", checked)}
+                    />
+                  </Field>
+                  <Separator />
+                  <div className="flex items-start gap-3 text-sm">
+                    <ShieldCheck
+                      className="mt-0.5 size-4 shrink-0 text-primary"
+                      aria-hidden="true"
+                    />
+                    <div className="flex flex-col gap-1">
+                      <span className="font-medium">全局广告状态</span>
+                      <span className="text-muted-foreground">
+                        {resource.data.settings.globalAdEnabled ? "已启用" : "已关闭"}
+                      </span>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
 
               {store ? (
                 <QrCodeCard
@@ -486,9 +510,9 @@ export default function StoreEditorPage(): React.JSX.Element {
                 />
               ) : (
                 <Alert>
-                  <UserRound aria-hidden="true" />
-                  <AlertTitle>先保存用户</AlertTitle>
-                  <AlertDescription>创建用户并保存 Wi-Fi 后，即可生成二维码。</AlertDescription>
+                  <Store aria-hidden="true" />
+                  <AlertTitle>先保存门店</AlertTitle>
+                  <AlertDescription>创建门店并保存 Wi-Fi 后，即可生成二维码。</AlertDescription>
                 </Alert>
               )}
 
@@ -552,11 +576,7 @@ export default function StoreEditorPage(): React.JSX.Element {
                   <div className="grid gap-5 md:grid-cols-2">
                     <Field data-invalid={!!errors.newPassword || undefined}>
                       <FieldLabel htmlFor="new-password">
-                        {draft.securityType === "OPEN"
-                          ? "Wi-Fi 密码（开放网络请留空）"
-                          : isNew
-                            ? "Wi-Fi 密码 *"
-                            : "新 Wi-Fi 密码 *"}
+                        {isNew ? "Wi-Fi 密码 *" : "新 Wi-Fi 密码 *"}
                       </FieldLabel>
                       <Input
                         id="new-password"
@@ -572,9 +592,7 @@ export default function StoreEditorPage(): React.JSX.Element {
                       {errors.newPassword ? <FieldError>{errors.newPassword}</FieldError> : null}
                     </Field>
                     <Field data-invalid={!!errors.confirmPassword || undefined}>
-                      <FieldLabel htmlFor="confirm-password">
-                        {draft.securityType === "OPEN" ? "确认密码（请留空）" : "确认新密码 *"}
-                      </FieldLabel>
+                      <FieldLabel htmlFor="confirm-password">确认新密码 *</FieldLabel>
                       <Input
                         id="confirm-password"
                         type="password"
@@ -687,21 +705,19 @@ export default function StoreEditorPage(): React.JSX.Element {
                     </Select>
                   </Field>
                 </div>
-                {isAdmin ? (
-                  <Field orientation="horizontal">
-                    <div className="flex flex-col gap-1.5">
-                      <FieldTitle id="wifi-status-label">Wi-Fi 配置状态</FieldTitle>
-                      <FieldDescription>关闭后保留配置，但不向顾客端下发。</FieldDescription>
-                    </div>
-                    <Switch
-                      aria-labelledby="wifi-status-label"
-                      checked={draft.wifiStatus === "active"}
-                      onCheckedChange={(checked) =>
-                        update("wifiStatus", checked ? "active" : "disabled")
-                      }
-                    />
-                  </Field>
-                ) : null}
+                <Field orientation="horizontal">
+                  <div className="flex flex-col gap-1.5">
+                    <FieldTitle id="wifi-status-label">Wi-Fi 配置状态</FieldTitle>
+                    <FieldDescription>关闭后保留配置，但不向顾客端下发。</FieldDescription>
+                  </div>
+                  <Switch
+                    aria-labelledby="wifi-status-label"
+                    checked={draft.wifiStatus === "active"}
+                    onCheckedChange={(checked) =>
+                      update("wifiStatus", checked ? "active" : "disabled")
+                    }
+                  />
+                </Field>
               </FieldGroup>
             </CardContent>
           </Card>
@@ -721,7 +737,7 @@ export default function StoreEditorPage(): React.JSX.Element {
         </TabsContent>
 
         <TabsContent value="statistics">
-          {store && isAdmin ? <StatisticsPanel storeId={store.id} /> : null}
+          {store ? <StatisticsPanel storeId={store.id} /> : null}
         </TabsContent>
       </Tabs>
 

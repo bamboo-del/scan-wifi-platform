@@ -1,5 +1,5 @@
+import { WifiPoster } from "./wifi-poster";
 import * as React from "react";
-import { useAuth } from "@/auth/auth-context";
 import Copy from "lucide-react/dist/esm/icons/copy";
 import Download from "lucide-react/dist/esm/icons/download";
 import Eye from "lucide-react/dist/esm/icons/eye";
@@ -30,26 +30,26 @@ import { cn } from "@/lib/utils";
 
 export function QrCodeCard({
   storeId,
+  wifiId,
   storeName,
   qrCode,
   onChange,
   compact = false,
 }: {
   storeId: string;
+  wifiId?: string;
   storeName: string;
   qrCode: QrCodeResponse | null;
   onChange: (value: QrCodeResponse) => void;
   compact?: boolean;
 }): React.JSX.Element {
-  const { admin } = useAuth();
-  const isAdmin = admin?.role === "admin";
   const [pendingAction, setPendingAction] = React.useState<"generate" | "status" | null>(null);
   const isActive = qrCode?.status === "active";
 
   const generate = async (): Promise<void> => {
     setPendingAction("generate");
     try {
-      const result = await api.generateQrCode(storeId);
+      const result = await api.generateQrCode(storeId, wifiId);
       onChange(result);
       toast.success("二维码已生成");
     } catch (error) {
@@ -78,12 +78,8 @@ export function QrCodeCard({
 
   const copyToken = async (): Promise<void> => {
     if (!qrCode) return;
-    try {
-      await navigator.clipboard.writeText(qrCode.sceneToken);
-      toast.success("场景 Token 已复制");
-    } catch {
-      toast.error("复制失败，请检查浏览器剪贴板权限");
-    }
+    await navigator.clipboard.writeText(qrCode.sceneToken);
+    toast.success("场景 Token 已复制");
   };
 
   return (
@@ -108,15 +104,8 @@ export function QrCodeCard({
                 <Badge variant="warning">仅供本地测试</Badge>
               ) : null}
             </div>
+            <WifiPoster storeName={storeName} qr={qrCode} />
             <dl className="grid gap-3 text-sm">
-              {isAdmin ? (
-                <div className="flex items-center justify-between gap-4">
-                  <dt className="text-muted-foreground">创建账号</dt>
-                  <dd className="break-all text-right">
-                    {qrCode.createdByUsername ?? "历史记录，未记录"}
-                  </dd>
-                </div>
-              ) : null}
               <div className="flex items-center justify-between gap-4">
                 <dt className="text-muted-foreground">生成时间</dt>
                 <dd>{formatDateTime(qrCode.generatedAt)}</dd>
@@ -148,7 +137,7 @@ export function QrCodeCard({
                 <DialogContent className="max-w-md">
                   <DialogHeader>
                     <DialogTitle>{storeName}</DialogTitle>
-                    <DialogDescription>打印前请确认用户名称和二维码状态。</DialogDescription>
+                    <DialogDescription>打印前请确认门店名称和二维码状态。</DialogDescription>
                   </DialogHeader>
                   <img
                     src={api.assetUrl(qrCode.previewUrl)}
@@ -165,42 +154,40 @@ export function QrCodeCard({
                 <Download data-icon="inline-start" />
                 下载
               </a>
-              {isAdmin ? (
-                <ConfirmActionDialog
-                  trigger={
-                    <Button
-                      type="button"
-                      variant={isActive ? "outline" : "default"}
-                      size="sm"
-                      disabled={pendingAction !== null}
-                    >
-                      {pendingAction === "status" ? (
-                        <Spinner data-icon="inline-start" />
-                      ) : isActive ? (
-                        <PauseCircle data-icon="inline-start" />
-                      ) : (
-                        <PlayCircle data-icon="inline-start" />
-                      )}
-                      {isActive ? "停用" : "启用"}
-                    </Button>
-                  }
-                  title={isActive ? "停用这个二维码？" : "重新启用二维码？"}
-                  description={
-                    isActive
-                      ? "停用后，顾客扫码将无法获取该用户连接配置，已打印的码会立即失效。"
-                      : "启用后，已打印的二维码会恢复提供用户连接服务。"
-                  }
-                  confirmLabel={isActive ? "确认停用" : "确认启用"}
-                  destructive={isActive}
-                  onConfirm={changeStatus}
-                />
-              ) : null}
+              <ConfirmActionDialog
+                trigger={
+                  <Button
+                    type="button"
+                    variant={isActive ? "outline" : "default"}
+                    size="sm"
+                    disabled={pendingAction !== null}
+                  >
+                    {pendingAction === "status" ? (
+                      <Spinner data-icon="inline-start" />
+                    ) : isActive ? (
+                      <PauseCircle data-icon="inline-start" />
+                    ) : (
+                      <PlayCircle data-icon="inline-start" />
+                    )}
+                    {isActive ? "停用" : "启用"}
+                  </Button>
+                }
+                title={isActive ? "停用这个二维码？" : "重新启用二维码？"}
+                description={
+                  isActive
+                    ? "停用后，顾客扫码将无法获取该门店连接配置，已打印的码会立即失效。"
+                    : "启用后，已打印的二维码会恢复提供门店连接服务。"
+                }
+                confirmLabel={isActive ? "确认停用" : "确认启用"}
+                destructive={isActive}
+                onConfirm={changeStatus}
+              />
             </div>
           </div>
         ) : (
           <ResourceEmpty
             title="尚未生成二维码"
-            description="完成 Wi-Fi 配置后可生成用户小程序码。"
+            description="完成 Wi-Fi 配置后可生成门店小程序码。"
             action={
               <Button
                 type="button"

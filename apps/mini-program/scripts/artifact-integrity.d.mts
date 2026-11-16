@@ -12,5 +12,4 @@ export interface MiniProgramArtifactSummary {
 export function verifyMiniProgramArtifact(options: {
   readonly packageRoot: string;
   readonly mode: MiniProgramArtifactMode;
-  readonly legacyWifiApiEnabled?: boolean;
 }): Promise<MiniProgramArtifactSummary>;

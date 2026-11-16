@@ -8,10 +8,7 @@ export class FastPasswordHasher implements PasswordHasher {
   }
 
   public async verify(hash: string, password: string): Promise<boolean> {
-    return (
-      (hash === "test-hash" && password === "correct horse battery staple") ||
-      hash === `test:${password}`
-    );
+    return hash === "test-hash" && password === "correct horse battery staple";
   }
 }
 
@@ -30,9 +27,13 @@ export class FakeQrCodeProvider implements QrCodeProvider {
 export class MemoryQrCodeStorage implements QrCodeStorage {
   private readonly values = new Map<string, Buffer>();
 
+  public get size(): number {
+    return this.values.size;
+  }
+
   public async save(
     sceneToken: string,
-    extension: "png" | "jpg" | "svg",
+    extension: "png" | "svg",
     content: Buffer,
   ): Promise<StoredQrCode> {
     const location = `local://qrcodes/${sceneToken}.${extension}`;
@@ -42,16 +43,13 @@ export class MemoryQrCodeStorage implements QrCodeStorage {
 
   public async read(
     location: string,
-  ): Promise<{ content: Buffer; contentType: "image/png" | "image/jpeg" | "image/svg+xml" }> {
+  ): Promise<{ content: Buffer; contentType: "image/png" | "image/svg+xml" }> {
     const content = this.values.get(location);
     if (!content) throw new Error("missing fake QR image");
-    return {
-      content,
-      contentType: location.endsWith(".png")
-        ? "image/png"
-        : location.endsWith(".jpg")
-          ? "image/jpeg"
-          : "image/svg+xml",
-    };
+    return { content, contentType: location.endsWith(".png") ? "image/png" : "image/svg+xml" };
+  }
+
+  public async delete(location: string): Promise<void> {
+    this.values.delete(location);
   }
 }

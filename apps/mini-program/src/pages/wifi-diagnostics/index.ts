@@ -15,6 +15,7 @@ interface InputEvent {
 }
 
 interface WifiDiagnosticsPageData {
+  readonly userMessage: string;
   readonly environment: string;
   readonly ssid: string;
   readonly password: string;
@@ -66,6 +67,7 @@ function statusLabel(status: WifiDiagnosticReport["status"]): string {
 
 function toPagePatch(report: WifiDiagnosticReport): Partial<WifiDiagnosticsPageData> {
   return {
+    userMessage: report.userMessage,
     running: report.status === "running",
     status: statusLabel(report.status),
     sdkVersion: report.sdkVersion,
@@ -93,6 +95,7 @@ const initialReport = createInitialWifiDiagnosticReport(wx);
 
 Page<WifiDiagnosticsPageData, WifiDiagnosticsPageMembers>({
   data: {
+    userMessage: "准备连接",
     environment: "unknown",
     ssid: "",
     password: "",

@@ -1,17 +1,23 @@
 import type {
-  AdminActor,
   PaginationResponse,
   StoreDetail,
   StoreSummary,
   WifiStatusResponse,
+  WifiNetworkResponse,
 } from "@scan-wifi/shared-types";
 import type { CreateStoreInput, PutWifiInput, UpdateStoreInput } from "@scan-wifi/validation";
-import { forbidden, notFound } from "../lib/errors.js";
+import { DEFAULT_MERCHANT_ID } from "../db/schema.js";
+import { notFound } from "../lib/errors.js";
+import { createSceneToken } from "./scene-token.js";
 import type { PlatformRepository } from "../repositories/platform-repository.js";
-import { requirePlatformAdmin, requireStoreAccess } from "./access-service.js";
 import type { AuditService } from "./audit-service.js";
 import type { EncryptionService } from "./encryption-service.js";
-import { presentStoreDetail, presentStoreSummary, presentWifi } from "./presenters.js";
+import {
+  presentQrCode,
+  presentStoreDetail,
+  presentStoreSummary,
+  presentWifi,
+} from "./presenters.js";
 
 export class StoreService {
   public constructor(
@@ -20,19 +26,13 @@ export class StoreService {
     private readonly audit: AuditService,
   ) {}
 
-  public async list(
-    input: {
-      page: number;
-      pageSize: number;
-      search?: string;
-      status?: "active" | "disabled";
-    },
-    actor: AdminActor,
-  ): Promise<PaginationResponse<StoreSummary>> {
-    const result = await this.repository.listStores({
-      ...input,
-      ...(actor.role === "operator" ? { ownerId: actor.id } : {}),
-    });
+  public async list(input: {
+    page: number;
+    pageSize: number;
+    search?: string;
+    status?: "active" | "disabled";
+  }): Promise<PaginationResponse<StoreSummary>> {
+    const result = await this.repository.listStores(input);
     return {
       items: result.items.map(presentStoreSummary),
       page: input.page,
@@ -42,15 +42,14 @@ export class StoreService {
     };
   }
 
-  public async create(input: CreateStoreInput, actor: AdminActor): Promise<StoreDetail> {
+  public async create(input: CreateStoreInput, adminId: string): Promise<StoreDetail> {
     return this.repository.transaction(async (repository) => {
-      const store = await repository.createStore(
-        actor.role === "operator" ? { ...input, status: "active", adEnabled: false } : input,
-        actor.id,
-      );
+      if (!(await repository.getMerchant(input.merchantId ?? DEFAULT_MERCHANT_ID)))
+        throw notFound("MERCHANT_NOT_FOUND", "商户不存在");
+      const store = await repository.createStore(input);
       await this.audit.record(
         {
-          adminId: actor.id,
+          adminId,
           action: "store.create",
           resourceType: "store",
           resourceId: store.id,
@@ -58,12 +57,12 @@ export class StoreService {
         },
         repository,
       );
-      return presentStoreDetail((await repository.getStore(store.id)) ?? store, null, null);
+      return presentStoreDetail(store, null, null);
     });
   }
 
-  public async get(id: string, actor: AdminActor): Promise<StoreDetail> {
-    const store = await requireStoreAccess(this.repository, id, actor);
+  public async get(id: string): Promise<StoreDetail> {
+    const store = await this.requireStore(id);
     const [wifi, qrCode] = await Promise.all([
       this.repository.getWifi(id),
       this.repository.getLatestQrForStore(id),
@@ -71,19 +70,16 @@ export class StoreService {
     return presentStoreDetail(store, wifi, qrCode);
   }
 
-  public async update(
-    id: string,
-    input: UpdateStoreInput,
-    actor: AdminActor,
-  ): Promise<StoreDetail> {
+  public async update(id: string, input: UpdateStoreInput, adminId: string): Promise<StoreDetail> {
     return this.repository.transaction(async (repository) => {
-      await requireStoreAccess(repository, id, actor, true);
-      requirePlatformAdmin(actor);
+      await this.requireStore(id, repository);
+      if (input.merchantId && !(await repository.getMerchant(input.merchantId)))
+        throw notFound("MERCHANT_NOT_FOUND", "商户不存在");
       const updated = await repository.updateStore(id, input);
-      if (!updated) throw notFound("STORE_NOT_FOUND", "用户不存在");
+      if (!updated) throw notFound("STORE_NOT_FOUND", "门店不存在");
       await this.audit.record(
         {
-          adminId: actor.id,
+          adminId,
           action: "store.update",
           resourceType: "store",
           resourceId: id,
@@ -95,23 +91,21 @@ export class StoreService {
         repository.getWifi(id),
         repository.getLatestQrForStore(id),
       ]);
-      return presentStoreDetail((await repository.getStore(id)) ?? updated, wifi, qrCode);
+      return presentStoreDetail(updated, wifi, qrCode);
     });
   }
 
   public async setStatus(
     id: string,
     status: "active" | "disabled",
-    actor: AdminActor,
+    adminId: string,
   ): Promise<StoreDetail> {
     return this.repository.transaction(async (repository) => {
-      await requireStoreAccess(repository, id, actor, true);
-      requirePlatformAdmin(actor);
       const updated = await repository.updateStore(id, { status });
-      if (!updated) throw notFound("STORE_NOT_FOUND", "用户不存在");
+      if (!updated) throw notFound("STORE_NOT_FOUND", "门店不存在");
       await this.audit.record(
         {
-          adminId: actor.id,
+          adminId,
           action: status === "active" ? "store.enable" : "store.disable",
           resourceType: "store",
           resourceId: id,
@@ -123,28 +117,34 @@ export class StoreService {
         repository.getWifi(id),
         repository.getLatestQrForStore(id),
       ]);
-      return presentStoreDetail((await repository.getStore(id)) ?? updated, wifi, qrCode);
+      return presentStoreDetail(updated, wifi, qrCode);
     });
   }
 
   public async putWifi(
     id: string,
     input: PutWifiInput,
-    actor: AdminActor,
+    adminId: string,
+    wifiId?: string,
+    create = false,
   ): Promise<WifiStatusResponse> {
     const encrypted = this.encryption.encrypt(input.password, `wifi-config:v1:${id}`);
     return this.repository.transaction(async (repository) => {
-      const store = await requireStoreAccess(repository, id, actor, true);
-      if (
-        actor.role === "operator" &&
-        (store.createdById !== actor.id ||
-          store.status !== "active" ||
-          input.status !== "active" ||
-          (await repository.getWifi(id)))
-      ) {
-        throw forbidden("同仁只能为自己新建的用户配置初始 Wi-Fi");
+      await this.requireStore(id, repository);
+      if (wifiId) {
+        const current = await repository.getWifiById(wifiId);
+        if (!current || current.storeId !== id) throw notFound("WIFI_NOT_FOUND", "Wi-Fi 不存在");
       }
-      const wifi = await repository.upsertWifi({
+      const inputRecord = {
+        shortId:
+          (wifiId
+            ? await repository.getWifiById(wifiId)
+            : !create
+              ? await repository.getWifi(id)
+              : null
+          )?.shortId ?? createSceneToken(),
+        spotName: input.spotName ?? "",
+        deletedAt: null,
         storeId: id,
         ssid: input.ssid,
         encryptedPassword: encrypted.ciphertext,
@@ -153,10 +153,14 @@ export class StoreService {
         bssid: input.bssid ?? null,
         securityType: input.securityType ?? null,
         status: input.status,
-      });
+      };
+      const wifi =
+        create || wifiId
+          ? await repository.saveWifi(inputRecord, wifiId)
+          : await repository.upsertWifi(inputRecord);
       await this.audit.record(
         {
-          adminId: actor.id,
+          adminId,
           action: "wifi.replace",
           resourceType: "wifi_config",
           resourceId: wifi.id,
@@ -168,8 +172,48 @@ export class StoreService {
     });
   }
 
-  public async getWifiStatus(id: string, actor: AdminActor): Promise<WifiStatusResponse> {
-    await requireStoreAccess(this.repository, id, actor);
+  public async getWifiStatus(id: string): Promise<WifiStatusResponse> {
+    await this.requireStore(id);
     return presentWifi(await this.repository.getWifi(id));
+  }
+
+  public async listWifi(storeId: string): Promise<WifiNetworkResponse[]> {
+    await this.requireStore(storeId);
+    const networks = await this.repository.listWifi(storeId);
+    return Promise.all(
+      networks.map(async (wifi) => {
+        const qr = await this.repository.getLatestQrForWifi(wifi.id);
+        return { ...presentWifi(wifi), qrCode: qr ? presentQrCode(qr) : null };
+      }),
+    );
+  }
+  public async setWifiStatus(
+    storeId: string,
+    wifiId: string,
+    status: "active" | "disabled",
+    adminId: string,
+  ): Promise<WifiStatusResponse> {
+    return this.repository.transaction(async (repository) => {
+      const wifi = await repository.getWifiById(wifiId);
+      if (!wifi || wifi.storeId !== storeId) throw notFound("WIFI_NOT_FOUND", "Wi-Fi 不存在");
+      const updated = await repository.setWifiStatus(wifiId, status);
+      await this.audit.record(
+        {
+          adminId,
+          action: "wifi.status",
+          resourceType: "wifi_config",
+          resourceId: wifiId,
+          metadata: { storeId, status },
+        },
+        repository,
+      );
+      return presentWifi(updated);
+    });
+  }
+
+  private async requireStore(id: string, repository: PlatformRepository = this.repository) {
+    const store = await repository.getStore(id);
+    if (!store) throw notFound("STORE_NOT_FOUND", "门店不存在");
+    return store;
   }
 }

@@ -4,18 +4,16 @@ import cors from "@fastify/cors";
 import rateLimit from "@fastify/rate-limit";
 import swagger from "@fastify/swagger";
 import swaggerUi from "@fastify/swagger-ui";
-import Fastify, { type FastifyInstance, type FastifyRequest } from "fastify";
+import Fastify, { type FastifyInstance } from "fastify";
 import { ZodError } from "zod";
 import { createDatabase } from "./db/client.js";
 import { AppError } from "./lib/errors.js";
-import { redactRequestUrl } from "./lib/redaction.js";
 import {
   PostgresPlatformRepository,
   type PlatformRepository,
 } from "./repositories/platform-repository.js";
 import { registerAdminRoutes } from "./routes/admin-routes.js";
 import { registerPublicRoutes } from "./routes/public-routes.js";
-import { AccountService } from "./services/account-service.js";
 import { AuditService } from "./services/audit-service.js";
 import { AuthService } from "./services/auth-service.js";
 import { EncryptionService } from "./services/encryption-service.js";
@@ -32,9 +30,18 @@ import { QrCodeService } from "./services/qrcode-service.js";
 import { LocalFileQrCodeStorage, type QrCodeStorage } from "./services/qrcode-storage.js";
 import { SettingsService } from "./services/settings-service.js";
 import { StatisticsService } from "./services/statistics-service.js";
+import { MerchantService } from "./services/merchant-service.js";
 import { StoreService } from "./services/store-service.js";
+import {
+  MerchantAuthService,
+  WechatCodeLoginProvider,
+  type WechatLoginProvider,
+} from "./services/merchant-auth-service.js";
+import { WifiSpotService } from "./services/wifi-spot-service.js";
+import { registerMerchantRoutes } from "./routes/merchant-routes.js";
 
 export interface ApplicationDependencies {
+  wechatLoginProvider?: WechatLoginProvider;
   repository?: PlatformRepository;
   qrCodeProvider?: QrCodeProvider;
   qrCodeStorage?: QrCodeStorage;
@@ -67,18 +74,11 @@ export async function buildApplication(
 ): Promise<FastifyInstance> {
   const loggerEnabled = dependencies.logger ?? config.NODE_ENV !== "test";
   const app = Fastify({
-    trustProxy: config.TRUST_PROXY_HOPS === 0 ? false : config.TRUST_PROXY_ADDRESSES,
+    ajv: { customOptions: { removeAdditional: false } },
+    trustProxy: config.TRUST_PROXY_HOPS === 0 ? false : config.TRUST_PROXY_HOPS,
     logger: loggerEnabled
       ? {
           level: config.NODE_ENV === "production" ? "info" : "debug",
-          serializers: {
-            req: (request: FastifyRequest) => ({
-              method: request.method,
-              url: redactRequestUrl(request.url),
-              hostname: request.hostname,
-              remoteAddress: request.ip,
-            }),
-          },
           redact: {
             paths: [
               "req.headers.authorization",
@@ -110,7 +110,7 @@ export async function buildApplication(
   await app.register(cors, {
     origin: config.ADMIN_WEB_ORIGIN,
     credentials: true,
-    methods: ["GET", "HEAD", "POST", "PUT", "PATCH", "OPTIONS"],
+    methods: ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Accept"],
     maxAge: 600,
   });
@@ -122,29 +122,31 @@ export async function buildApplication(
     errorResponseBuilder: (_request, context) =>
       new AppError(context.statusCode, "RATE_LIMITED", "请求过于频繁，请稍后再试"),
   });
-  await app.register(swagger, {
-    openapi: {
-      info: {
-        title: "用户免费扫码连接 Wi-Fi API",
-        description: "平台管理员与匿名小程序连接 API。管理接口使用 HttpOnly Cookie 会话。",
-        version: "0.1.0",
+  if (config.NODE_ENV !== "production") {
+    await app.register(swagger, {
+      openapi: {
+        info: {
+          title: "门店免费扫码连接 Wi-Fi API",
+          description: "平台管理员与匿名小程序连接 API。管理接口使用 HttpOnly Cookie 会话。",
+          version: "0.1.0",
+        },
+        tags: [
+          { name: "管理员认证" },
+          { name: "门店" },
+          { name: "Wi-Fi" },
+          { name: "小程序码" },
+          { name: "统计" },
+          { name: "审计" },
+          { name: "设置" },
+          { name: "顾客端" },
+        ],
       },
-      tags: [
-        { name: "管理员认证" },
-        { name: "用户" },
-        { name: "Wi-Fi" },
-        { name: "小程序码" },
-        { name: "统计" },
-        { name: "审计" },
-        { name: "设置" },
-        { name: "顾客端" },
-      ],
-    },
-  });
-  await app.register(swaggerUi, {
-    routePrefix: "/documentation",
-    uiConfig: { docExpansion: "list", deepLinking: false },
-  });
+    });
+    await app.register(swaggerUi, {
+      routePrefix: "/documentation",
+      uiConfig: { docExpansion: "list", deepLinking: false },
+    });
+  }
 
   const audit = new AuditService(repository);
   const encryption = new EncryptionService(config.WIFI_ENCRYPTION_KEY_BASE64);
@@ -156,7 +158,6 @@ export async function buildApplication(
     new LoginThrottle(),
     config.SESSION_SECRET,
     config.SESSION_TTL_HOURS,
-    config.INITIAL_ADMIN_USERNAME,
   );
   const storeService = new StoreService(repository, encryption, audit);
   const qrCodeService = new QrCodeService(
@@ -232,13 +233,36 @@ export async function buildApplication(
       .send({ error: { code: "ROUTE_NOT_FOUND", message: "接口不存在", requestId: request.id } });
   });
 
-  app.get("/health", { schema: { hide: true } }, async () => {
-    await repository.healthCheck();
-    return {
-      status: "ok",
-      checks: { database: "ok" },
-      time: new Date().toISOString(),
-    };
+  await app.register(
+    async (merchantApp) =>
+      registerMerchantRoutes(
+        merchantApp,
+        new MerchantAuthService(
+          repository,
+          dependencies.wechatLoginProvider ??
+            new WechatCodeLoginProvider(config.WECHAT_APP_ID, config.WECHAT_APP_SECRET),
+          config.SESSION_SECRET,
+        ),
+        new WifiSpotService(repository, encryption, qrCodeService),
+      ),
+    { prefix: "/api/merchant" },
+  );
+
+  app.get("/health", { schema: { hide: true } }, async (_request, reply) => {
+    try {
+      await repository.healthCheck();
+      return {
+        status: "ok",
+        checks: { database: "ok" },
+        time: new Date().toISOString(),
+      };
+    } catch {
+      return reply.code(503).send({
+        status: "unavailable",
+        checks: { database: "failed" },
+        time: new Date().toISOString(),
+      });
+    }
   });
   await app.register(
     async (adminApp) =>
@@ -246,11 +270,11 @@ export async function buildApplication(
         adminApp,
         {
           auth,
-          accounts: new AccountService(repository, passwords, audit, config.INITIAL_ADMIN_USERNAME),
           stores: storeService,
           qrCodes: qrCodeService,
           statistics,
           settings,
+          merchants: new MerchantService(repository, audit),
         },
         config,
       ),

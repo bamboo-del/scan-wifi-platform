@@ -32,32 +32,19 @@ import { formatDateTime } from "@/lib/format";
 import type { OperationLog } from "@/lib/types";
 
 const actionLabels: Record<string, string> = {
-  "store.create": "创建用户",
-  "store.update": "编辑用户",
-  "store.enable": "启用用户",
-  "store.disable": "停用用户",
+  "store.create": "创建门店",
+  "store.update": "编辑门店",
+  "store.enable": "启用门店",
+  "store.disable": "停用门店",
   "wifi.replace": "替换 Wi-Fi 配置",
   "qrcode.generate": "生成二维码",
   "qrcode.enable": "启用二维码",
   "qrcode.disable": "停用二维码",
-  "store.transfer": "转移用户",
-  "account.create": "新增同仁",
-  "account.status": "更新账号状态",
-  "account.reset_password": "重置同仁密码",
-  "account.change_password": "修改本人密码",
   "settings.update": "更新系统设置",
 };
 
 function metadataSummary(metadata: OperationLog["metadata"]): string {
   if (!metadata) return "—";
-  if (typeof metadata.reason === "string" && "previousOwnerId" in metadata) {
-    const previous =
-      typeof metadata.previousOwnerUsername === "string"
-        ? metadata.previousOwnerUsername
-        : "平台用户";
-    const next = typeof metadata.ownerUsername === "string" ? metadata.ownerUsername : "平台用户";
-    return `${previous} → ${next}；${metadata.reason}`;
-  }
   const safeKeys = Object.keys(metadata).filter((key) => !/(password|secret|token|key)/i.test(key));
   return safeKeys.length ? `字段：${safeKeys.join("、")}` : "已脱敏";
 }
@@ -123,11 +110,10 @@ export default function OperationLogsPage(): React.JSX.Element {
               <SelectContent>
                 <SelectGroup>
                   <SelectItem value="all">全部操作</SelectItem>
-                  <SelectItem value="store">用户管理</SelectItem>
+                  <SelectItem value="store">门店管理</SelectItem>
                   <SelectItem value="wifi">Wi-Fi 配置</SelectItem>
                   <SelectItem value="qrcode">二维码管理</SelectItem>
                   <SelectItem value="settings">系统设置</SelectItem>
-                  <SelectItem value="account">账号管理</SelectItem>
                 </SelectGroup>
               </SelectContent>
             </Select>
@@ -149,7 +135,7 @@ export default function OperationLogsPage(): React.JSX.Element {
                 <TableHeader>
                   <TableRow>
                     <TableHead>时间</TableHead>
-                    <TableHead>操作者</TableHead>
+                    <TableHead>管理员</TableHead>
                     <TableHead>操作</TableHead>
                     <TableHead>资源类型</TableHead>
                     <TableHead>资源 ID</TableHead>
