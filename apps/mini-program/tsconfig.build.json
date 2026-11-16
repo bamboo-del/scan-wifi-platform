@@ -1,0 +1,16 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "target": "ES2018",
+    "module": "CommonJS",
+    "moduleResolution": "Node",
+    "noEmit": false,
+    "noEmitOnError": true,
+    "outDir": "dist",
+    "rootDir": ".build",
+    "types": [],
+    "declaration": false,
+    "sourceMap": false
+  },
+  "include": [".build/**/*.ts", ".build/**/*.d.ts"]
+}

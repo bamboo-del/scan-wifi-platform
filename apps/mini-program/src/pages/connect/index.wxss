@@ -1,0 +1,383 @@
+.page-shell {
+  min-height: 100vh;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  padding: 24rpx 48rpx calc(36rpx + env(safe-area-inset-bottom));
+  background: #ffffff;
+}
+
+.ad-shell {
+  width: 100%;
+  max-height: 260rpx;
+  margin-bottom: 38rpx;
+  overflow: hidden;
+  opacity: 1;
+  transition:
+    max-height 180ms ease,
+    margin 180ms ease,
+    opacity 150ms ease;
+}
+
+.ad-shell--collapsed {
+  max-height: 0;
+  margin-bottom: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.ad-shell ad {
+  display: block;
+  width: 100%;
+}
+
+.connect-content {
+  width: 100%;
+  max-width: 654rpx;
+  margin: 0 auto;
+  flex: 1;
+}
+
+.identity-block {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding-top: 32rpx;
+}
+
+.mark-wrap {
+  width: 132rpx;
+  height: 132rpx;
+  padding: 6rpx;
+  box-sizing: border-box;
+  border-radius: 50%;
+  background: #ffffff;
+  box-shadow: 0 14rpx 48rpx rgba(10, 165, 143, 0.14);
+  overflow: hidden;
+}
+
+.wifi-mark,
+.store-logo {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+}
+
+.welcome-title {
+  margin-top: 34rpx;
+  color: #101918;
+  font-size: 40rpx;
+  font-weight: 700;
+  line-height: 1.35;
+  text-align: center;
+  letter-spacing: -0.4rpx;
+}
+
+.availability-line {
+  display: flex;
+  align-items: center;
+  margin-top: 22rpx;
+  color: #33403e;
+  font-size: 27rpx;
+  line-height: 1;
+}
+
+.availability-icon {
+  width: 34rpx;
+  height: 34rpx;
+  margin-right: 12rpx;
+}
+
+.ssid-row {
+  height: 96rpx;
+  margin-top: 34rpx;
+  padding: 0 30rpx;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  border: 1rpx solid #d9e1df;
+  border-radius: 30rpx;
+  background: #ffffff;
+}
+
+.ssid-icon {
+  width: 42rpx;
+  height: 42rpx;
+  margin-right: 24rpx;
+  flex: none;
+}
+
+.ssid-text {
+  min-width: 0;
+  overflow: hidden;
+  color: #18211f;
+  font-size: 31rpx;
+  font-weight: 500;
+  line-height: 1.3;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.primary-button {
+  height: 96rpx;
+  margin-top: 28rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 30rpx;
+  background: linear-gradient(135deg, #14b7a0 0%, #079c87 100%);
+  color: #ffffff;
+  font-size: 32rpx;
+  font-weight: 700;
+  line-height: 96rpx;
+  letter-spacing: 0.4rpx;
+}
+
+.primary-button--disabled {
+  background: #edf6f4;
+  color: #8c9b98;
+}
+
+.button-spinner {
+  width: 26rpx;
+  height: 26rpx;
+  margin-right: 18rpx;
+  border: 4rpx solid rgba(140, 155, 152, 0.34);
+  border-top-color: #80908d;
+  border-radius: 50%;
+  animation: spin 800ms linear infinite;
+}
+
+.button-icon {
+  width: 34rpx;
+  height: 34rpx;
+  margin-right: 15rpx;
+}
+
+.privacy-line {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-top: 26rpx;
+  color: #87918f;
+  font-size: 23rpx;
+  line-height: 1.45;
+  text-align: center;
+}
+
+.privacy-icon {
+  width: 28rpx;
+  height: 28rpx;
+  margin-right: 10rpx;
+  flex: none;
+}
+
+.status-section {
+  margin-top: 50rpx;
+}
+
+.status-label {
+  display: flex;
+  align-items: center;
+  margin-bottom: 18rpx;
+  color: #26312f;
+  font-size: 25rpx;
+  line-height: 1;
+}
+
+.status-dot {
+  width: 13rpx;
+  height: 13rpx;
+  margin-right: 14rpx;
+  border-radius: 50%;
+  background: #7c8785;
+}
+
+.status-dot--progress,
+.status-dot--success {
+  background: #0aa58f;
+}
+
+.status-dot--danger {
+  background: #f04444;
+}
+
+.status-card {
+  padding: 26rpx 28rpx;
+  border: 1rpx solid #dfe6e4;
+  border-radius: 30rpx;
+  background: #ffffff;
+}
+
+.status-card--progress {
+  border-color: #d6e8e4;
+  background: #fbfefd;
+}
+
+.status-card--success {
+  border-color: #cde8e1;
+  background: #f7fcfa;
+}
+
+.status-card--danger {
+  border-color: #f1dada;
+  background: #fffefe;
+}
+
+.status-heading-row {
+  display: flex;
+  align-items: center;
+}
+
+.status-title {
+  color: #17211f;
+  font-size: 30rpx;
+  font-weight: 700;
+  line-height: 1.4;
+}
+
+.status-message {
+  margin-top: 10rpx;
+  color: #697472;
+  font-size: 24rpx;
+  line-height: 1.65;
+}
+
+.status-spinner {
+  width: 30rpx;
+  height: 30rpx;
+  margin-right: 18rpx;
+  border: 4rpx solid #d7e5e2;
+  border-top-color: #0aa58f;
+  border-radius: 50%;
+  animation: spin 800ms linear infinite;
+}
+
+.status-symbol {
+  width: 34rpx;
+  height: 34rpx;
+  margin-right: 16rpx;
+  flex: none;
+}
+
+.progress-list {
+  margin-top: 26rpx;
+  padding-top: 24rpx;
+  border-top: 1rpx solid #e7eceb;
+}
+
+.progress-row {
+  display: flex;
+  align-items: center;
+  color: #65716f;
+  font-size: 25rpx;
+  line-height: 1.4;
+}
+
+.progress-row--spaced {
+  margin-top: 20rpx;
+}
+
+.progress-icon {
+  width: 30rpx;
+  height: 30rpx;
+  margin-right: 20rpx;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  font-size: 20rpx;
+  line-height: 1;
+}
+
+.progress-icon--done {
+  background: #0aa58f;
+  color: #ffffff;
+}
+
+.progress-icon--active {
+  border: 4rpx solid #cae7e1;
+  border-top-color: #0aa58f;
+  animation: spin 800ms linear infinite;
+}
+
+.progress-icon--pending {
+  border: 3rpx solid #d9e1df;
+}
+
+.manual-toggle {
+  min-height: 64rpx;
+  margin: 18rpx auto 0;
+  padding: 0 14rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  background: transparent;
+  color: #079c87;
+  font-size: 25rpx;
+  font-weight: 500;
+  line-height: 1.4;
+}
+
+.manual-chevron {
+  width: 28rpx;
+  height: 28rpx;
+  margin-left: 12rpx;
+  transform: translateY(-2rpx);
+  transition: transform 160ms ease;
+}
+
+.manual-chevron--open {
+  transform: rotate(180deg) translateY(2rpx);
+}
+
+.troubleshooting-list {
+  margin-top: 8rpx;
+  padding: 20rpx 22rpx;
+  border: 1rpx solid #e4e9e8;
+  border-radius: 28rpx;
+  background: #ffffff;
+}
+
+.troubleshooting-row {
+  display: flex;
+  color: #687371;
+  font-size: 22rpx;
+  line-height: 1.65;
+}
+
+.step-number {
+  width: 32rpx;
+  flex: none;
+  color: #4f5c59;
+}
+
+.provider-footer {
+  padding-top: 62rpx;
+  color: #8b9492;
+  font-size: 23rpx;
+  line-height: 1.4;
+  text-align: center;
+}
+
+.diagnostics-entry {
+  min-height: 64rpx;
+  margin: 28rpx auto 0;
+  padding: 0 26rpx;
+  border: 1rpx dashed #8fb9b2;
+  border-radius: 18rpx;
+  background: #f6fbfa;
+  color: #087b6a;
+  font-size: 23rpx;
+  line-height: 64rpx;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}

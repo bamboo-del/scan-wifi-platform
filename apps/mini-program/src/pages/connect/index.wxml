@@ -1,0 +1,112 @@
+<view class="page-shell">
+  <view wx:if="{{adEligible}}" class="{{adShellClass}}">
+    <ad
+      unit-id="{{adUnitId}}"
+      ad-type="banner"
+      ad-theme="white"
+      bindload="onAdLoad"
+      binderror="onAdError"
+    />
+  </view>
+
+  <view class="connect-content">
+    <view class="identity-block">
+      <view class="mark-wrap">
+        <image
+          wx:if="{{logoUrl}}"
+          class="store-logo"
+          src="{{logoUrl}}"
+          mode="aspectFill"
+          aria-label="用户头像"
+        />
+        <image
+          wx:else
+          class="wifi-mark"
+          src="../../assets/wifi-mark.svg"
+          mode="aspectFit"
+          aria-label="Wi-Fi 标志"
+        />
+      </view>
+
+      <view class="welcome-title">{{welcomeTitle}}</view>
+      <view wx:if="{{showAvailability}}" class="availability-line">
+        <image class="availability-icon" src="../../assets/shield.svg" mode="aspectFit" />
+        <text>可连接网络</text>
+      </view>
+    </view>
+
+    <view class="ssid-row" aria-label="Wi-Fi 名称 {{ssid}}">
+      <image class="ssid-icon" src="../../assets/wifi-row.svg" mode="aspectFit" />
+      <text class="ssid-text">{{ssid}}</text>
+    </view>
+
+    <button
+      class="{{primaryButtonClass}}"
+      disabled="{{buttonDisabled}}"
+      bindtap="onPrimaryTap"
+      aria-label="{{buttonLabel}}"
+    >
+      <view wx:if="{{isProgress}}" class="button-spinner" aria-hidden="true"></view>
+      <image wx:elif="{{showRetryIcon}}" class="button-icon" src="../../assets/refresh.svg" mode="aspectFit" />
+      <text>{{buttonLabel}}</text>
+    </button>
+
+    <view class="privacy-line">
+      <image class="privacy-icon" src="../../assets/lock.svg" mode="aspectFit" />
+      <text>无需填写手机号，不收集个人身份信息</text>
+    </view>
+
+    <view class="status-section">
+      <view class="status-label">
+        <view class="{{statusDotClass}}"></view>
+        <text>连接状态</text>
+      </view>
+
+      <view class="{{statusCardClass}}">
+        <view class="status-heading-row">
+          <view wx:if="{{isProgress}}" class="status-spinner"></view>
+          <image wx:elif="{{isSuccess}}" class="status-symbol" src="../../assets/check-circle.svg" mode="aspectFit" />
+          <image wx:elif="{{showManualToggle}}" class="status-symbol" src="../../assets/alert-circle.svg" mode="aspectFit" />
+          <text class="status-title">{{statusTitle}}</text>
+        </view>
+        <view class="status-message">{{statusMessage}}</view>
+
+        <view wx:if="{{isProgress}}" class="progress-list">
+          <view class="progress-row">
+            <view class="progress-icon {{initialized ? 'progress-icon--done' : 'progress-icon--active'}}">
+              {{initialized ? '✓' : ''}}
+            </view>
+            <text>正在初始化 Wi-Fi</text>
+          </view>
+          <view class="progress-row progress-row--spaced">
+            <view class="progress-icon {{isConnecting ? 'progress-icon--active' : 'progress-icon--pending'}}"></view>
+            <text>正在连接网络</text>
+          </view>
+        </view>
+
+        <button
+          wx:if="{{showManualToggle}}"
+          class="manual-toggle"
+          bindtap="onToggleTroubleshooting"
+          aria-expanded="{{troubleshootingExpanded}}"
+        >
+          <text>查看手动解决方式</text>
+          <image class="manual-chevron {{troubleshootingExpanded ? 'manual-chevron--open' : ''}}" src="../../assets/chevron-down.svg" mode="aspectFit" />
+        </button>
+
+        <view wx:if="{{showManualToggle && troubleshootingExpanded}}" class="troubleshooting-list">
+          <view class="troubleshooting-row"><text class="step-number">1.</text><text>确认手机 Wi-Fi 已开启</text></view>
+          <view class="troubleshooting-row"><text class="step-number">2.</text><text>确认您在无线网络覆盖范围内并靠近路由器</text></view>
+          <view class="troubleshooting-row"><text class="step-number">3.</text><text>允许微信使用无线局域网和所需系统权限</text></view>
+          <view class="troubleshooting-row"><text class="step-number">4.</text><text>关闭并重新打开小程序后重试</text></view>
+          <view class="troubleshooting-row"><text class="step-number">5.</text><text>仍无法连接时，请在系统设置中选择 {{ssid}}</text></view>
+        </view>
+      </view>
+    </view>
+  </view>
+
+  <button wx:if="{{showWifiDiagnostics}}" class="diagnostics-entry" bindtap="onWifiDiagnosticsTap">
+    打开 Wi-Fi 诊断
+  </button>
+  <view class="provider-footer">本服务由{{brandName}}提供</view>
+</view>

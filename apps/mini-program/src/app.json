@@ -1,0 +1,13 @@
+{
+  "pages": ["pages/connect/index"],
+  "window": {
+    "navigationBarBackgroundColor": "#ffffff",
+    "navigationBarTextStyle": "black",
+    "navigationBarTitleText": "轻连 WiFi",
+    "backgroundColor": "#ffffff",
+    "backgroundTextStyle": "light"
+  },
+  "style": "v2",
+  "lazyCodeLoading": "requiredComponents",
+  "sitemapLocation": "sitemap.json"
+}

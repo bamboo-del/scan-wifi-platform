@@ -1,0 +1,53 @@
+{
+  email {$ACME_EMAIL}
+  admin off
+  log {
+    output stdout
+    format filter {
+      wrap json
+      fields {
+        request>uri regexp "/api/public/connect/[^/?]+" "/api/public/connect/[REDACTED]"
+        request>headers>Referer delete
+      }
+    }
+  }
+}
+
+{$API_DOMAIN} {
+  encode zstd gzip
+  log {
+    output stdout
+    format filter {
+      wrap json
+      fields {
+        request>uri regexp "/api/public/connect/[^/?]+" "/api/public/connect/[REDACTED]"
+        request>headers>Referer delete
+      }
+    }
+  }
+
+  @documentation path /documentation /documentation/*
+  respond @documentation 404
+
+  header {
+    Strict-Transport-Security "max-age=31536000; includeSubDomains"
+    -Server
+  }
+
+  reverse_proxy api:3100
+}
+
+{$ADMIN_DOMAIN} {
+  encode zstd gzip
+  log {
+    output stdout
+    format json
+  }
+
+  header {
+    Strict-Transport-Security "max-age=31536000; includeSubDomains"
+    -Server
+  }
+
+  reverse_proxy admin:8080
+}

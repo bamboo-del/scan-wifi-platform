@@ -1,0 +1,26 @@
+{
+  "name": "@scan-wifi/mini-program",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build-mini-program.mjs",
+    "build:develop": "node scripts/build-mini-program.mjs",
+    "build:local": "node scripts/build-mini-program.mjs --local",
+    "build:trial": "node scripts/build-mini-program.mjs --trial",
+    "build:production": "node scripts/build-mini-program.mjs --production",
+    "build:release": "node scripts/build-mini-program.mjs --production",
+    "verify:artifact": "node scripts/artifact-integrity.mjs",
+    "verify:artifact:trial": "node scripts/artifact-integrity.mjs --trial",
+    "verify:artifact:production": "node scripts/artifact-integrity.mjs --production",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint src tests vitest.config.ts --max-warnings=0 && eslint --config eslint.scripts.config.mjs scripts/*.mjs --max-warnings=0",
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage"
+  },
+  "devDependencies": {
+    "@vitest/coverage-v8": "^4.1.11",
+    "typescript": "^5.8.3",
+    "vitest": "^4.1.11"
+  }
+}

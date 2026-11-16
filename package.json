@@ -1,0 +1,43 @@
+{
+  "name": "scan-wifi-platform",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@11.7.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "pnpm --parallel --filter @scan-wifi/api --filter @scan-wifi/admin-web dev",
+    "setup:env": "node scripts/setup-local-env.mjs",
+    "build": "pnpm -r build",
+    "build:production": "node scripts/build-production.mjs",
+    "typecheck": "pnpm -r typecheck",
+    "lint": "pnpm -r lint && pnpm lint:root-scripts",
+    "lint:root-scripts": "eslint --config eslint.scripts.config.mjs scripts/production-gates.mjs scripts/production-preflight.mjs scripts/production-preflight.test.mjs scripts/build-production.mjs scripts/security-scan.mjs",
+    "test": "pnpm -r test && node --test scripts/production-preflight.test.mjs",
+    "test:coverage": "pnpm -r test:coverage",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "security:scan": "node scripts/security-scan.mjs",
+    "security:scan:production": "node scripts/security-scan.mjs --production",
+    "quality": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm build && pnpm security:scan",
+    "db:generate": "pnpm --filter @scan-wifi/api db:generate",
+    "db:migrate": "pnpm --filter @scan-wifi/api db:migrate",
+    "admin:init": "pnpm --filter @scan-wifi/api admin:init",
+    "e2e": "pnpm --filter @scan-wifi/admin-web e2e",
+    "prod:config": "pnpm prod:preflight && docker compose --env-file .env.production -f docker-compose.prod.yml config",
+    "prod:preflight": "node scripts/production-preflight.mjs",
+    "prod:preflight:template": "node scripts/production-preflight.mjs --template --env-file=.env.production.example",
+    "prod:build": "pnpm prod:preflight && docker compose --env-file .env.production -f docker-compose.prod.yml build",
+    "prod:up": "pnpm prod:preflight && docker compose --env-file .env.production -f docker-compose.prod.yml up -d",
+    "prod:down": "docker compose --env-file .env.production -f docker-compose.prod.yml down",
+    "prod:logs": "docker compose --env-file .env.production -f docker-compose.prod.yml logs --tail=200 -f",
+    "prod:backup": "docker compose --env-file .env.production -f docker-compose.prod.yml --profile ops run --rm backup --once"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "eslint": "^10.6.0",
+    "prettier": "^3.9.5",
+    "typescript-eslint": "^8.63.0"
+  }
+}

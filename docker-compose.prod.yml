@@ -1,0 +1,208 @@
+name: scan-wifi-production
+
+x-logging: &default-logging
+  driver: local
+  options:
+    max-size: "10m"
+    max-file: "5"
+
+x-service-security: &service-security
+  security_opt:
+    - no-new-privileges:true
+
+services:
+  postgres:
+    image: postgres:16.14-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:?POSTGRES_DB is required}
+      POSTGRES_USER: ${POSTGRES_OWNER_USER:?POSTGRES_OWNER_USER is required}
+      POSTGRES_PASSWORD: ${POSTGRES_OWNER_PASSWORD:?POSTGRES_OWNER_PASSWORD is required}
+      POSTGRES_APP_USER: ${POSTGRES_APP_USER:?POSTGRES_APP_USER is required}
+      POSTGRES_APP_PASSWORD: ${POSTGRES_APP_PASSWORD:?POSTGRES_APP_PASSWORD is required}
+      TZ: UTC
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./docker/postgres/init:/docker-entrypoint-initdb.d:ro
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    logging: *default-logging
+    <<: *service-security
+
+  migrate:
+    build:
+      context: .
+      target: api
+    image: scan-wifi-api:${IMAGE_TAG:-latest}
+    restart: "no"
+    environment:
+      MIGRATION_DATABASE_URL: postgresql://${POSTGRES_OWNER_USER:?POSTGRES_OWNER_USER is required}:${POSTGRES_OWNER_PASSWORD:?POSTGRES_OWNER_PASSWORD is required}@postgres:5432/${POSTGRES_DB:?POSTGRES_DB is required}
+    command: ["node", "dist/migrate.js"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - backend
+    logging: *default-logging
+    <<: *service-security
+
+  admin-init:
+    image: scan-wifi-api:${IMAGE_TAG:-latest}
+    profiles: ["init"]
+    restart: "no"
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_APP_USER:?POSTGRES_APP_USER is required}:${POSTGRES_APP_PASSWORD:?POSTGRES_APP_PASSWORD is required}@postgres:5432/${POSTGRES_DB:?POSTGRES_DB is required}
+      DATABASE_POOL_MAX: "2"
+      INITIAL_ADMIN_USERNAME: ${INITIAL_ADMIN_USERNAME:-wifi_admin}
+      INITIAL_ADMIN_PASSWORD: ${INITIAL_ADMIN_PASSWORD:-}
+    command: ["node", "dist/init-admin.js"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    networks:
+      - backend
+    logging: *default-logging
+    <<: *service-security
+
+  api:
+    image: scan-wifi-api:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      API_HOST: 0.0.0.0
+      API_PORT: "3100"
+      TRUST_PROXY_HOPS: "1"
+      TRUST_PROXY_ADDRESSES: "172.30.250.2"
+      ADMIN_WEB_ORIGIN: https://${ADMIN_DOMAIN:?ADMIN_DOMAIN is required}
+      COOKIE_SECURE: "true"
+      DATABASE_URL: postgresql://${POSTGRES_APP_USER:?POSTGRES_APP_USER is required}:${POSTGRES_APP_PASSWORD:?POSTGRES_APP_PASSWORD is required}@postgres:5432/${POSTGRES_DB:?POSTGRES_DB is required}
+      DATABASE_POOL_MAX: ${DATABASE_POOL_MAX:-10}
+      WIFI_ENCRYPTION_KEY_BASE64: ${WIFI_ENCRYPTION_KEY_BASE64:?WIFI_ENCRYPTION_KEY_BASE64 is required}
+      SESSION_SECRET: ${SESSION_SECRET:?SESSION_SECRET is required}
+      SESSION_TTL_HOURS: ${SESSION_TTL_HOURS:-12}
+      WECHAT_APP_ID: ${WECHAT_APP_ID:?WECHAT_APP_ID is required}
+      WECHAT_APP_SECRET: ${WECHAT_APP_SECRET:?WECHAT_APP_SECRET is required}
+      WECHAT_QR_PAGE: ${WECHAT_QR_PAGE:-pages/connect/index}
+      WECHAT_ENV_VERSION: release
+      QR_CODE_PROVIDER: wechat
+      QR_CODE_STORAGE_DIR: /app/storage/qrcodes
+      MINIPROGRAM_ENABLE_LEGACY_WIFI_API: ${MINIPROGRAM_ENABLE_LEGACY_WIFI_API:-false}
+      MINIPROGRAM_AD_UNIT_ID: ${MINIPROGRAM_AD_UNIT_ID:-}
+      MINIPROGRAM_BRAND_NAME: ${MINIPROGRAM_BRAND_NAME:-轻连 WiFi}
+    volumes:
+      - qr_data:/app/storage/qrcodes
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    networks:
+      - edge
+      - backend
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3100/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    logging: *default-logging
+    <<: *service-security
+
+  admin:
+    build:
+      context: .
+      target: admin
+      args:
+        VITE_API_BASE_URL: https://${API_DOMAIN:?API_DOMAIN is required}
+        VITE_DEMO_MODE: "false"
+    image: scan-wifi-admin:${IMAGE_TAG:-latest}
+    user: "101:101"
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+      - /var/cache/nginx:size=16m,uid=101,gid=101,mode=0700
+    networks:
+      - edge
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:8080/healthz | grep -q ok"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    logging: *default-logging
+    <<: *service-security
+
+  caddy:
+    image: caddy:2.11.4-alpine
+    restart: unless-stopped
+    environment:
+      API_DOMAIN: ${API_DOMAIN:?API_DOMAIN is required}
+      ADMIN_DOMAIN: ${ADMIN_DOMAIN:?ADMIN_DOMAIN is required}
+      ACME_EMAIL: ${ACME_EMAIL:?ACME_EMAIL is required}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      api:
+        condition: service_healthy
+      admin:
+        condition: service_healthy
+    networks:
+      edge:
+        ipv4_address: 172.30.250.2
+    logging: *default-logging
+    <<: *service-security
+
+  backup:
+    image: postgres:16.14-alpine
+    profiles: ["ops"]
+    restart: unless-stopped
+    environment:
+      DATABASE_BACKUP_URL: ${DATABASE_BACKUP_URL:?DATABASE_BACKUP_URL is required}
+      BACKUP_DIR: /backups
+      BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-14}
+      BACKUP_INTERVAL_SECONDS: ${BACKUP_INTERVAL_SECONDS:-86400}
+    entrypoint: ["/bin/sh", "/opt/backup/backup-postgres.sh"]
+    command: ["--loop"]
+    volumes:
+      - ./scripts/backup-postgres.sh:/opt/backup/backup-postgres.sh:ro
+      - ${BACKUP_HOST_DIR:?BACKUP_HOST_DIR is required}:/backups
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - backend
+    logging: *default-logging
+    <<: *service-security
+
+networks:
+  edge:
+    ipam:
+      config:
+        - subnet: 172.30.250.0/28
+          ip_range: 172.30.250.8/29
+  backend:
+    internal: true
+
+volumes:
+  postgres_data:
+  qr_data:
+  caddy_data:
+  caddy_config:

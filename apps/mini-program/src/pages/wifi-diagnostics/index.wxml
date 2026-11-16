@@ -1,0 +1,49 @@
+<view class="diagnostic-page">
+  <view class="warning-card">
+    <view class="warning-title">仅开发版 / 体验版</view>
+    <view class="warning-text">数据只保存在本页，不会上传。密码仅传给微信连接接口，任何诊断结果都不会显示密码。</view>
+  </view>
+
+  <view class="section">
+    <view class="section-title">运行环境</view>
+    <view class="kv-row"><text>环境</text><text>{{environment}}</text></view>
+    <view class="kv-row"><text>微信基础库</text><text>{{sdkVersion}}</text></view>
+    <view class="kv-row"><text>手机系统</text><text class="kv-value">{{system}}</text></view>
+    <view class="kv-row"><text>wx.startWifi</text><text>{{startWifiAvailable ? '存在' : '不存在'}}</text></view>
+    <view class="kv-row"><text>wx.connectWifi</text><text>{{connectWifiAvailable ? '存在' : '不存在'}}</text></view>
+    <view class="kv-row"><text>onWifiConnected</text><text>{{standardListenerAvailable ? '存在' : '不存在'}}</text></view>
+    <view class="kv-row"><text>offWifiConnected</text><text>{{standardCleanupAvailable ? '存在' : '不存在'}}</text></view>
+    <view class="kv-row"><text>部分信息监听</text><text>{{partialListenerAvailable ? '存在' : '不存在'}}</text></view>
+    <view class="kv-row"><text>部分信息清理</text><text>{{partialCleanupAvailable ? '存在' : '不存在'}}</text></view>
+  </view>
+
+  <view class="section">
+    <view class="section-title">测试网络</view>
+    <label class="field-label" for="ssid">SSID</label>
+    <input id="ssid" class="field-input" value="{{ssid}}" bindinput="onSsidInput" placeholder="请输入 Wi-Fi 名称" />
+    <label class="field-label" for="password">password</label>
+    <input id="password" class="field-input" value="{{password}}" password bindinput="onPasswordInput" placeholder="请输入 Wi-Fi 密码" />
+    <label class="field-label" for="bssid">BSSID（可选）</label>
+    <input id="bssid" class="field-input" value="{{bssid}}" bindinput="onBssidInput" placeholder="例如 AA:BB:CC:DD:EE:FF" />
+    <button class="run-button" disabled="{{running}}" bindtap="onRunTap">{{running ? '诊断中…' : '开始顺序诊断'}}</button>
+  </view>
+
+  <view class="section">
+    <view class="section-title">诊断结果</view>
+    <view class="kv-row"><text>状态</text><text>{{status}}</text></view>
+    <view class="kv-row"><text>选用监听</text><text class="kv-value">{{selectedListener}}</text></view>
+    <view class="kv-row"><text>选用清理</text><text class="kv-value">{{selectedCleanup}}</text></view>
+    <view class="kv-row"><text>清理状态</text><text class="kv-value">{{cleanupStatus}}</text></view>
+    <view class="kv-row"><text>errCode</text><text>{{errCodeText}}</text></view>
+    <view class="kv-row"><text>errMsg</text><text class="kv-value">{{errMsg}}</text></view>
+    <view class="kv-row"><text>连接耗时</text><text>{{durationText}}</text></view>
+    <view class="kv-row"><text>监听触发次数</text><text>{{listenerTriggerCount}}</text></view>
+
+    <view class="result-label">startWifi 完整脱敏结果</view>
+    <scroll-view class="result-box" scroll-y><text user-select="true">{{startResult}}</text></scroll-view>
+    <view class="result-label">connectWifi 完整脱敏结果</view>
+    <scroll-view class="result-box" scroll-y><text user-select="true">{{connectResult}}</text></scroll-view>
+    <view class="result-label">最近一次监听脱敏结果</view>
+    <scroll-view class="result-box" scroll-y><text user-select="true">{{lastListenerResult}}</text></scroll-view>
+  </view>
+</view>
